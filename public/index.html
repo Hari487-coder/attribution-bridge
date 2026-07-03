@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attribution Bridge</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #161d2e; --panel2: #1c2438; --line: #2a3550;
+    --text: #e6ebf5; --dim: #8b96ad; --accent: #4f8cff; --ok: #3ecf8e;
+    --warn: #f5a623; --bad: #f0556d; --mono: ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { color: var(--dim); font-size: 12.5px; }
+  #mockBadge { margin-left: auto; font-size: 11px; padding: 2px 10px; border-radius: 999px; background: #3a2d10; color: var(--warn); border: 1px solid #5c4a1d; display: none; }
+  nav { display: flex; gap: 4px; padding: 10px 24px 0; border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: none; color: var(--dim); padding: 8px 14px; cursor: pointer; font-size: 13.5px; border-bottom: 2px solid transparent; }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 20px 24px 60px; max-width: 1080px; }
+  section { display: none; }
+  section.active { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 4px; }
+  .card p.hint { color: var(--dim); font-size: 12.5px; margin: 0 0 12px; }
+  label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 3px; }
+  input, select { width: 100%; max-width: 460px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  input:focus, select:focus { outline: 1px solid var(--accent); }
+  button.action { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; cursor: pointer; margin-top: 12px; }
+  button.action.secondary { background: var(--panel2); border: 1px solid var(--line); }
+  button.action.danger { background: var(--bad); }
+  button.action:disabled { opacity: .5; cursor: default; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12px; }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11.5px; }
+  .pill.ok   { background: #10301f; color: var(--ok); border: 1px solid #1d4f36; }
+  .pill.bad  { background: #38141d; color: var(--bad); border: 1px solid #5c2231; }
+  .pill.warn { background: #3a2d10; color: var(--warn); border: 1px solid #5c4a1d; }
+  .pill.dim  { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); }
+  pre.result { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; }
+  .verdict { border-radius: 8px; padding: 14px 16px; margin-top: 14px; font-size: 14px; display: none; }
+  .verdict.allow { background: #10301f; border: 1px solid #1d4f36; display: block; }
+  .verdict.block { background: #38141d; border: 1px solid #5c2231; display: block; }
+  .verdict .big { font-size: 16px; font-weight: 600; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .row > div { flex: 1 1 320px; }
+  .broker-grid { display: grid; grid-template-columns: 130px 1fr 1fr 34px; gap: 8px; align-items: center; margin-top: 8px; }
+  .broker-grid input { max-width: none; }
+  .broker-grid .del { background: none; border: none; color: var(--bad); font-size: 16px; cursor: pointer; }
+  .small { font-size: 12px; color: var(--dim); }
+  code { font-family: var(--mono); background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .toast { position: fixed; bottom: 18px; right: 18px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; font-size: 13px; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Attribution Bridge</h1>
+  <span class="sub">GHL lead distribution that survives Assistable's DNC attribution check</span>
+  <span id="mockBadge">MOCK MODE — no live GHL calls</span>
+</header>
+<nav>
+  <button data-tab="precheck" class="active">Pre-check</button>
+  <button data-tab="distribute">Distribute</button>
+  <button data-tab="registry">Verified registry</button>
+  <button data-tab="migrate">Backlog migration</button>
+  <button data-tab="setup">Setup</button>
+  <button data-tab="activity">Activity</button>
+  <button data-tab="playbook">Playbook</button>
+</nav>
+<main>
+
+<!-- ── Pre-check ── -->
+<section id="tab-precheck" class="active">
+  <div class="card">
+    <h2>Would Assistable block this call?</h2>
+    <p class="hint">Replicates the exact production gate (DND → attribution evidence → national DNC registry) without placing a call. Number-only checks skip the contact-level steps.</p>
+    <div class="row">
+      <div>
+        <label>Phone number (any format)</label>
+        <input id="pcPhone" placeholder="+1 555 123 4567">
+      </div>
+      <div>
+        <label>Location (for contact-aware check)</label>
+        <select id="pcBroker"><option value="">— number only —</option></select>
+        <label>GHL Contact ID (optional)</label>
+        <input id="pcContact" placeholder="e.g. broker_copy_1">
+      </div>
+    </div>
+    <button class="action" id="pcRun">Run pre-check</button>
+    <div id="pcVerdict" class="verdict"></div>
+    <pre id="pcDetail" class="result" style="display:none"></pre>
+  </div>
+</section>
+
+<!-- ── Distribute ── -->
+<section id="tab-distribute">
+  <div class="card">
+    <h2>Manual distribute</h2>
+    <p class="hint">Copies a master contact into a broker location through the API channel (create, not upsert) so the new record carries <code>createdBy.source = "INTEGRATION"</code>. The live pipeline does the same automatically via the webhook.</p>
+    <div class="row">
+      <div>
+        <label>Master contact ID</label>
+        <input id="dContact" placeholder="GHL contact id from the master location">
+      </div>
+      <div>
+        <label>Target broker</label>
+        <select id="dBroker"></select>
+      </div>
+    </div>
+    <button class="action" id="dRun">Distribute</button>
+    <pre id="dResult" class="result" style="display:none"></pre>
+  </div>
+  <div class="card">
+    <h2>Channel test</h2>
+    <p class="hint">Creates a disposable test contact through the configured token, reads back the <code>createdBy.source</code> stamp GHL actually assigned, then deletes it. Run this once per broker <b>before</b> trusting the pipeline — it answers whether this token type earns the INTEGRATION stamp.</p>
+    <label>Location</label>
+    <select id="tBroker"></select>
+    <button class="action" id="tRun">Run channel test</button>
+    <div id="tVerdict" class="verdict"></div>
+    <pre id="tResult" class="result" style="display:none"></pre>
+  </div>
+</section>
+
+<!-- ── Registry ── -->
+<section id="tab-registry">
+  <div class="card">
+    <h2>Verified attribution registry</h2>
+    <p class="hint">The bridge refuses to distribute a lead unless its <b>master</b> record shows genuine opt-in (attribution or a real Meta/IG integration) — so a cold contact dumped into the master can't be laundered past DNC. Each verification is signed (HMAC) and workspace-scoped. An opt-out (withdraw) always wins and is never overridden.</p>
+    <button class="action secondary" id="regRefresh">Refresh</button>
+    <div id="regWrap" style="max-height:360px;overflow:auto;margin-top:10px"></div>
+  </div>
+  <div class="card">
+    <h2>Manually verify a master contact</h2>
+    <p class="hint">Fetches the contact from the master location, checks opt-in evidence, and registers it if it passes. Use for leads that arrived before the webhook was wired.</p>
+    <label>Master contact ID</label>
+    <input id="regVerifyId" placeholder="GHL contact id in the master location">
+    <button class="action" id="regVerifyBtn">Verify &amp; register</button>
+    <pre id="regVerifyResult" class="result" style="display:none"></pre>
+  </div>
+  <div class="card">
+    <h2>Record an opt-out</h2>
+    <p class="hint">Withdraws a number. Future bridges of this number are refused. Wire GHL's opt-out/STOP workflow to <code>POST /webhook/optout</code> to automate this.</p>
+    <label>Phone number</label>
+    <input id="regOptoutPhone" placeholder="+1 555 123 4567">
+    <label>Reason (optional)</label>
+    <input id="regOptoutReason" placeholder="e.g. customer texted STOP">
+    <button class="action danger" id="regOptoutBtn">Withdraw / opt out</button>
+    <pre id="regOptoutResult" class="result" style="display:none"></pre>
+  </div>
+</section>
+
+<!-- ── Migrate ── -->
+<section id="tab-migrate">
+  <div class="card">
+    <h2>Backlog migration</h2>
+    <p class="hint">Existing copies made with GHL "Copy Contact" keep their old stamp forever (createdBy is immutable). This scans a broker location for contacts that would fail the evidence check, then deletes + recreates them through the API channel. <b>Dry-run first, always.</b></p>
+    <label>Broker</label>
+    <select id="mBroker"></select>
+    <button class="action secondary" id="mScan">Scan for candidates</button>
+    <div id="mScanSummary" class="small" style="margin-top:10px"></div>
+    <div id="mTableWrap" style="max-height:340px;overflow:auto"></div>
+    <div id="mActions" style="display:none">
+      <button class="action" id="mDry">Dry-run selected</button>
+      <button class="action danger" id="mLive">Recreate selected (deletes originals)</button>
+    </div>
+    <pre id="mResult" class="result" style="display:none"></pre>
+  </div>
+</section>
+
+<!-- ── Setup ── -->
+<section id="tab-setup">
+  <div class="card">
+    <h2>Master location</h2>
+    <p class="hint">The GHL sub-account where Meta leads land with their attribution intact.</p>
+    <div class="row">
+      <div><label>Location ID</label><input id="cfgMasterLoc"></div>
+      <div><label>API token (Private Integration or OAuth)</label><input id="cfgMasterTok" type="password" placeholder="unchanged if left masked"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Brokers</h2>
+    <p class="hint">One row per broker sub-account. The <b>key</b> is what the master workflow sends as <code>broker_key</code>.</p>
+    <div class="broker-grid" id="brokerRows">
+      <b class="small">Key</b><b class="small">Location ID</b><b class="small">API token</b><span></span>
+    </div>
+    <button class="action secondary" id="cfgAddBroker">+ Add broker</button>
+  </div>
+  <div class="card">
+    <h2>Pipeline settings</h2>
+    <div class="row">
+      <div>
+        <label>Webhook key (shared secret for /webhook/lead)</label>
+        <input id="cfgWebhookKey" placeholder="generate something long + random">
+        <label>Dashboard password (Basic auth user "admin"; empty = open)</label>
+        <input id="cfgAdminPass" type="password" placeholder="unchanged if left as (set)">
+      </div>
+      <div>
+        <label>Duplicate policy (broker already has this phone)</label>
+        <select id="cfgDupPolicy">
+          <option value="skip">skip — log and leave the old copy</option>
+          <option value="recreate">recreate — delete old copy, create fresh</option>
+        </select>
+        <label>Copy custom fields (matched by fieldKey)</label>
+        <select id="cfgCopyCf"><option value="true">yes</option><option value="false">no</option></select>
+        <label>Bridge tag added to every created contact</label>
+        <input id="cfgBridgeTag">
+        <label>Require master opt-in evidence (safety gate)</label>
+        <select id="cfgRequireEvidence">
+          <option value="true">on — refuse to bridge non-opted-in leads (recommended)</option>
+          <option value="false">off — bridge anything (unsafe)</option>
+        </select>
+        <label>Default country calling code (for opt-out matching)</label>
+        <input id="cfgCallingCode" placeholder="1" style="max-width:120px">
+        <div class="small" style="color:var(--dim)">Digits only, no +. "1" = US/Canada. Set to your country (e.g. 44 UK, 61 AU) so a national-format opt-out matches an E.164 record.</div>
+        <div class="small" id="cfgSecretStatus" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <button class="action" id="cfgSave">Save configuration</button>
+    <div class="small" id="cfgSaved" style="margin-top:8px"></div>
+  </div>
+</section>
+
+<!-- ── Activity ── -->
+<section id="tab-activity">
+  <div class="card">
+    <h2>Activity log</h2>
+    <button class="action secondary" id="logRefresh">Refresh</button>
+    <div id="logWrap" style="max-height:520px;overflow:auto"></div>
+  </div>
+</section>
+
+<!-- ── Playbook ── -->
+<section id="tab-playbook">
+  <div class="card">
+    <h2>Why this works</h2>
+    <p class="hint" style="margin-bottom:6px">Assistable allows an outbound AI call to a national-DNC number only when the GHL contact shows opt-in evidence: populated <code>attributionSource</code>, populated <code>lastAttributionSource</code>, or <code>createdBy.source = "INTEGRATION"</code>. GHL's native "Copy Contact" produces none of these. Contacts <i>created via an API integration</i> get the INTEGRATION stamp — so this app replaces Copy Contact with an API create.</p>
+  </div>
+  <div class="card">
+    <h2>Rollout steps</h2>
+    <ol style="margin:0;padding-left:20px;font-size:13.5px;line-height:2">
+      <li><b>Setup tab</b> — enter master + broker location IDs and API tokens; set a webhook key; save.</li>
+      <li><b>Channel test</b> (Distribute tab) — run once per broker. If it reports FAIL (stamp isn't INTEGRATION for your token type), switch that broker's token to a GHL OAuth-app connection (e.g. a Make/Zapier GHL connection) and re-test.</li>
+      <li><b>Master GHL workflow</b> — replace the "Copy Contact" action with a Webhook action:<br>
+        <code>POST https://&lt;your-host&gt;/webhook/lead?key=&lt;webhook key&gt;</code><br>
+        JSON body: <code>{"contact_id": "{{contact.id}}", "broker_key": "&lt;key&gt;"}</code> — route the broker_key with workflow branches or a custom value.</li>
+      <li><b>Verify one lead end-to-end</b> — trigger a test lead, check the Activity tab shows <span class="pill ok">passes</span>, then confirm the AI call goes through in Assistable.</li>
+      <li><b>Backlog</b> (Migration tab) — scan each broker, dry-run, then recreate the blocked copies.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h2>Hosting the webhook</h2>
+    <p class="hint">GHL must reach this app over HTTPS. Quick options: <code>cloudflared tunnel --url http://localhost:3344</code> for a persistent tunnel from this machine, or deploy the folder to Render/Railway (it's a single <code>node server.js</code>, no build step). Set a dashboard password before exposing it.</p>
+  </div>
+  <div class="card">
+    <h2>How the verification model works</h2>
+    <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.9;color:var(--dim)">
+      <li><b>Verify-first:</b> the bridge checks the <i>master</i> contact's genuine opt-in (attribution / real Meta integration / not-DND) — fields GHL sets and the customer can't forge — and refuses to bridge anything that fails. A cold contact dumped into the master won't pass.</li>
+      <li><b>Signed &amp; workspace-scoped:</b> each verification is HMAC-signed and stored per phone, defensible across this master's brokers but never shared to unrelated workspaces.</li>
+      <li><b>Opt-out always wins:</b> a withdrawal is never overridden by a later verification. Wire GHL's STOP/opt-out workflow to <code>/webhook/optout</code>.</li>
+      <li><b>Honest about enforcement:</b> Assistable does <i>not</i> read the signature — it still allows the call because of the <code>INTEGRATION</code> stamp the bridge applies. The security gain is the webapp <i>refusing to stamp</i> non-opted-in contacts. The signed note is an audit trail + a forward-compat hook if Assistable later adds real server-side verification.</li>
+      <li><code>createdBy</code> is immutable → backlog migration deletes + recreates, which drops that contact's GHL history. Migrate only un-worked contacts. Standard fields, tags, and fieldKey-matched custom fields are preserved; conversations/tasks are not.</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let CONFIG = null;
+
+// Escape any value that reaches innerHTML. GHL contact names / error strings are
+// attacker-influenceable (a lead could be named "<img src=x onerror=…>").
+function esc(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
+  );
+}
+
+// ── tabs ──
+document.querySelectorAll("nav button").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll("nav button").forEach((x) => x.classList.remove("active"));
+    document.querySelectorAll("main section").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    $("tab-" + b.dataset.tab).classList.add("active");
+    if (b.dataset.tab === "registry") loadRegistry();
+    if (b.dataset.tab === "activity") loadLog();
+  };
+});
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  setTimeout(() => (t.style.display = "none"), 3200);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch("/api" + path, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const json = await res.json().catch(() => ({ ok: false, error: "bad JSON from server" }));
+  return json;
+}
+
+// ── config load / render ──
+function brokerOptions(selectEl, { includeMaster = false, includeNone = false } = {}) {
+  const keep = selectEl.value;
+  selectEl.innerHTML = "";
+  if (includeNone) selectEl.add(new Option("— number only —", ""));
+  if (includeMaster) selectEl.add(new Option("Master (" + (CONFIG.master.locationId || "unset") + ")", "master"));
+  for (const [key, b] of Object.entries(CONFIG.brokers)) {
+    selectEl.add(new Option(`${key} (${b.locationId || "no location"})`, key));
+  }
+  if (keep) selectEl.value = keep;
+}
+
+function renderBrokerRows() {
+  const grid = $("brokerRows");
+  grid.querySelectorAll(".brow").forEach((r) => r.remove());
+  for (const [key, b] of Object.entries(CONFIG.brokers)) {
+    addBrokerRow(key, b.locationId, b.token);
+  }
+}
+
+function addBrokerRow(key = "", loc = "", tok = "") {
+  const grid = $("brokerRows");
+  const mk = (el, attrs = {}) => Object.assign(document.createElement(el), attrs);
+  const kIn = mk("input", { value: key, placeholder: "broker-a", className: "bkey" });
+  const lIn = mk("input", { value: loc, placeholder: "GHL location id", className: "bloc" });
+  const tIn = mk("input", { value: tok, placeholder: "API token", className: "btok", type: "password" });
+  const del = mk("button", { textContent: "✕", className: "del", title: "remove" });
+  [kIn, lIn, tIn, del].forEach((el) => {
+    el.classList.add("brow");
+    grid.appendChild(el);
+  });
+  del.onclick = () => [kIn, lIn, tIn, del].forEach((el) => el.remove());
+}
+
+async function loadConfig() {
+  const r = await api("/config");
+  if (!r.ok) return toast("config load failed: " + r.error);
+  CONFIG = r.config;
+  $("mockBadge").style.display = r.mock ? "inline-block" : "none";
+  $("cfgMasterLoc").value = CONFIG.master.locationId || "";
+  $("cfgMasterTok").value = CONFIG.master.token || "";
+  $("cfgWebhookKey").value = CONFIG.webhookKey || "";
+  $("cfgAdminPass").value = CONFIG.adminPassword || "";
+  $("cfgDupPolicy").value = CONFIG.settings.duplicatePolicy;
+  $("cfgCopyCf").value = String(CONFIG.settings.copyCustomFields);
+  $("cfgBridgeTag").value = CONFIG.settings.bridgeTag || "";
+  $("cfgRequireEvidence").value = String(CONFIG.settings.requireMasterEvidence !== false);
+  $("cfgCallingCode").value = CONFIG.settings.defaultCallingCode || "1";
+  $("cfgSecretStatus").textContent = CONFIG.signingSecret === "(set)"
+    ? "Signing secret: set ✓ (used to sign verification records)"
+    : "Signing secret: will be generated on first run";
+  renderBrokerRows();
+  brokerOptions($("pcBroker"), { includeMaster: true, includeNone: true });
+  brokerOptions($("dBroker"));
+  brokerOptions($("tBroker"), { includeMaster: true });
+  brokerOptions($("mBroker"));
+}
+
+$("cfgAddBroker").onclick = () => addBrokerRow();
+
+$("cfgSave").onclick = async () => {
+  const grid = $("brokerRows");
+  const keys = [...grid.querySelectorAll(".bkey")];
+  const locs = [...grid.querySelectorAll(".bloc")];
+  const toks = [...grid.querySelectorAll(".btok")];
+  const brokers = {};
+  keys.forEach((k, i) => {
+    const key = k.value.trim();
+    if (!key) return;
+    brokers[key] = { label: key, locationId: locs[i].value.trim(), token: toks[i].value.trim() };
+  });
+  const r = await api("/config", {
+    method: "POST",
+    body: {
+      webhookKey: $("cfgWebhookKey").value.trim(),
+      adminPassword: $("cfgAdminPass").value,
+      master: { locationId: $("cfgMasterLoc").value.trim(), token: $("cfgMasterTok").value.trim() },
+      brokers,
+      settings: {
+        duplicatePolicy: $("cfgDupPolicy").value,
+        copyCustomFields: $("cfgCopyCf").value === "true",
+        bridgeTag: $("cfgBridgeTag").value.trim(),
+        requireMasterEvidence: $("cfgRequireEvidence").value === "true",
+        defaultCallingCode: ($("cfgCallingCode").value.trim() || "1").replace(/\D/g, "") || "1",
+      },
+    },
+  });
+  if (r.ok) {
+    $("cfgSaved").textContent = "Saved ✓ (tokens shown masked; leaving them masked keeps the stored value)";
+    await loadConfig();
+  } else toast("save failed: " + (r.error || "unknown"));
+};
+
+// ── verified registry ──
+async function loadRegistry() {
+  const r = await api("/verify/list");
+  if (!r.ok) return;
+  const rows = r.entries.map((e) => {
+    const pill = e.status === "active"
+      ? `<span class="pill ok">verified</span>`
+      : `<span class="pill bad">opted out</span>`;
+    const when = (e.status === "active" ? e.verifiedAt : e.withdrawnAt) || "";
+    const detail = e.status === "active" ? esc(e.evidence || "") : esc(e.withdrawnReason || "");
+    const act = e.status === "active"
+      ? `<button class="del regWithdraw" data-phone="${esc(e.phone)}" title="opt out">✕</button>`
+      : "";
+    return `<tr><td class="mono">${esc(e.phone)}</td><td>${pill}</td>
+      <td class="small">${detail}</td><td class="mono small">${esc(String(when).replace("T"," ").slice(0,19))}</td>
+      <td class="mono small">${esc(e.masterContactId || "—")}</td><td>${act}</td></tr>`;
+  }).join("");
+  $("regWrap").innerHTML = r.entries.length
+    ? `<table><tr><th>Phone</th><th>Status</th><th>Evidence / reason</th><th>When</th><th>Master ID</th><th></th></tr>${rows}</table>`
+    : "<p class='small'>No verifications yet — distribute a lead or verify a master contact manually.</p>";
+  document.querySelectorAll(".regWithdraw").forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm(`Opt out ${b.dataset.phone}? Future bridges of this number will be refused.`)) return;
+      await api("/verify/withdraw", { method: "POST", body: { phone: b.dataset.phone, reason: "manual (registry tab)" } });
+      loadRegistry();
+    };
+  });
+}
+$("regRefresh").onclick = loadRegistry;
+$("regVerifyBtn").onclick = async () => {
+  const r = await api("/verify/register", { method: "POST", body: { contactId: $("regVerifyId").value.trim() } });
+  $("regVerifyResult").style.display = "block";
+  $("regVerifyResult").textContent = JSON.stringify(r, null, 2);
+  if (r.ok) { toast("Verified + registered"); loadRegistry(); }
+  else toast("Refused: " + (r.reason || r.error));
+};
+$("regOptoutBtn").onclick = async () => {
+  const r = await api("/verify/withdraw", { method: "POST", body: { phone: $("regOptoutPhone").value.trim(), reason: $("regOptoutReason").value.trim() || undefined } });
+  $("regOptoutResult").style.display = "block";
+  $("regOptoutResult").textContent = JSON.stringify(r, null, 2);
+  if (r.ok) { toast("Opted out"); loadRegistry(); }
+};
+
+// ── pre-check ──
+$("pcRun").onclick = async () => {
+  $("pcRun").disabled = true;
+  const r = await api("/precheck", {
+    method: "POST",
+    body: {
+      phone: $("pcPhone").value.trim() || undefined,
+      brokerKey: $("pcBroker").value || undefined,
+      contactId: $("pcContact").value.trim() || undefined,
+    },
+  });
+  $("pcRun").disabled = false;
+  const v = $("pcVerdict");
+  if (!r.ok) {
+    v.className = "verdict block";
+    v.innerHTML = `<span class="big">Error</span><br>${esc(r.error)}`;
+    $("pcDetail").style.display = "none";
+    return;
+  }
+  v.className = "verdict " + (r.wouldBlock ? "block" : "allow");
+  const reg = r.registryStatus || { status: "none" };
+  const regPill =
+    reg.status === "verified"
+      ? `<span class="pill ok" style="margin-left:8px">registry: verified (${esc(reg.evidence)})</span>`
+      : reg.status === "withdrawn"
+        ? `<span class="pill bad" style="margin-left:8px">registry: opted out</span>`
+        : `<span class="pill dim" style="margin-left:8px">registry: not verified</span>`;
+  v.innerHTML = `<span class="big">${r.wouldBlock ? "🚫 Would be BLOCKED" : "✅ Would go through"}</span>
+    <span class="pill dim" style="margin-left:8px">${esc(r.reason)}</span>${regPill}<br>${esc(r.detail)}
+    ${r.contactChecked ? "" : "<br><span class='small'>Number-only check — contact-level DND/attribution not evaluated.</span>"}`;
+  $("pcDetail").textContent = JSON.stringify(r, null, 2);
+  $("pcDetail").style.display = "block";
+};
+
+// ── distribute ──
+$("dRun").onclick = async () => {
+  $("dRun").disabled = true;
+  const r = await api("/distribute", {
+    method: "POST",
+    body: { contactId: $("dContact").value.trim(), brokerKey: $("dBroker").value },
+  });
+  $("dRun").disabled = false;
+  $("dResult").style.display = "block";
+  $("dResult").textContent = JSON.stringify(r, null, 2);
+  if (r.refused) toast("Refused: " + r.reason);
+  else if (r.ok && r.verification?.passes) toast("Verified + bridged: evidence " + r.verification.evidence);
+};
+
+// ── channel test ──
+$("tRun").onclick = async () => {
+  $("tRun").disabled = true;
+  const r = await api("/test-channel", { method: "POST", body: { brokerKey: $("tBroker").value } });
+  $("tRun").disabled = false;
+  const v = $("tVerdict");
+  v.className = "verdict " + (r.ok && r.passes ? "allow" : "block");
+  v.innerHTML = `<span class="big">${r.ok ? (r.passes ? "✅ Channel PASSES" : "❌ Channel FAILS") : "Error"}</span><br>${esc(r.verdict || r.error)}`;
+  $("tResult").style.display = "block";
+  $("tResult").textContent = JSON.stringify(r, null, 2);
+};
+
+// ── migration ──
+let mCandidates = [];
+$("mScan").onclick = async () => {
+  $("mScan").disabled = true;
+  const r = await api("/migrate/scan", { method: "POST", body: { brokerKey: $("mBroker").value } });
+  $("mScan").disabled = false;
+  if (!r.ok) return toast("scan failed: " + r.error);
+  mCandidates = r.candidates;
+  $("mScanSummary").innerHTML = `Scanned <b>${r.scanned}</b> contacts — <b>${r.candidates.length}</b> would fail the evidence check${r.truncated ? " (page limit hit — rerun after migrating)" : ""}.`;
+  const rows = r.candidates
+    .map(
+      (c) => `<tr>
+        <td><input type="checkbox" class="mSel" value="${esc(c.id)}" checked></td>
+        <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
+        <td><span class="pill ${c.createdBySource === "INTEGRATION" ? "ok" : "warn"}">${esc(c.createdBySource ?? "—")}</span></td>
+        <td class="mono">${esc(c.id)}</td></tr>`
+    )
+    .join("");
+  $("mTableWrap").innerHTML = r.candidates.length
+    ? `<table><tr><th></th><th>Name</th><th>Phone</th><th>createdBy.source</th><th>ID</th></tr>${rows}</table>`
+    : "<p class='small'>Nothing to migrate 🎉</p>";
+  $("mActions").style.display = r.candidates.length ? "block" : "none";
+};
+
+async function runMigrate(dryRun) {
+  const ids = [...document.querySelectorAll(".mSel:checked")].map((c) => c.value);
+  if (!ids.length) return toast("nothing selected");
+  if (!dryRun && !confirm(`Delete + recreate ${ids.length} contact(s)? Their GHL conversation history in this location is lost.`)) return;
+  const r = await api("/migrate/run", {
+    method: "POST",
+    body: { brokerKey: $("mBroker").value, contactIds: ids, dryRun },
+  });
+  $("mResult").style.display = "block";
+  $("mResult").textContent = JSON.stringify(r, null, 2);
+}
+$("mDry").onclick = () => runMigrate(true);
+$("mLive").onclick = () => runMigrate(false);
+
+// ── activity ──
+async function loadLog() {
+  const r = await api("/log");
+  if (!r.ok) return;
+  const rows = r.entries
+    .map((e) => {
+      const status =
+        e.refused
+          ? `<span class="pill bad">refused</span>`
+          : e.ok === false || e.error
+          ? `<span class="pill bad">error</span>`
+          : e.verification?.passes || e.passes
+            ? `<span class="pill ok">passes</span>`
+            : e.kind === "verify-register"
+              ? `<span class="pill ok">verified</span>`
+              : e.kind === "verify-withdraw"
+                ? `<span class="pill warn">opted out</span>`
+            : e.skipped
+              ? `<span class="pill warn">skipped</span>`
+              : `<span class="pill dim">${e.wouldBlock === true ? "block" : e.wouldBlock === false ? "allow" : "ok"}</span>`;
+      const detail = e.reason || e.error || e.detail || e.verdict ||
+        (e.kind === "distribute" ? `${e.masterContactId} → ${e.brokerKey} (${e.brokerContactId ?? "—"})` :
+         e.kind === "precheck" ? `${e.phone} → ${e.reason}` :
+         e.kind === "verify-register" ? `${e.phone} (${e.evidence})` :
+         e.kind === "verify-withdraw" ? `${e.phone}` :
+         e.kind === "migrate-run" ? `${e.recreated}/${e.total} recreated${e.dryRun ? " (dry)" : ""}` :
+         e.kind === "migrate-scan" ? `${e.candidates} candidates / ${e.scanned} scanned` : "");
+      return `<tr><td class="mono small">${esc((e.at || "").replace("T", " ").slice(0, 19))}</td>
+        <td>${esc(e.kind ?? "")}</td><td>${status}</td><td class="small">${esc(detail)}</td></tr>`;
+    })
+    .join("");
+  $("logWrap").innerHTML = `<table><tr><th>Time</th><th>Event</th><th>Status</th><th>Detail</th></tr>${rows || ""}</table>`;
+}
+$("logRefresh").onclick = loadLog;
+
+loadConfig().then(loadLog);
+</script>
+</body>
+</html>
