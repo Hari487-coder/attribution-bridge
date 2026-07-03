@@ -302,13 +302,27 @@ function toast(msg) {
 }
 
 async function api(path, opts = {}) {
-  const res = await fetch("/api" + path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  const json = await res.json().catch(() => ({ ok: false, error: "bad JSON from server" }));
-  return json;
+  let res;
+  try {
+    res = await fetch("/api" + path, {
+      headers: { "Content-Type": "application/json" },
+      ...opts,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch (e) {
+    return { ok: false, error: `Can't reach the server (${e.message}). It may be restarting.` };
+  }
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Non-JSON usually means a proxy error page (e.g. Cloudflare/Render 5xx) sat
+    // in front of the app rather than the app itself answering.
+    return {
+      ok: false,
+      error: `Server returned a non-JSON response (HTTP ${res.status}). This is usually the hosting proxy — the app may be restarting or briefly unreachable. Try again in a moment.`,
+    };
+  }
 }
 
 // ── config load / render ──

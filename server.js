@@ -262,7 +262,10 @@ api.post("/precheck", async (req, res) => {
     });
     res.json({ ok: true, contactChecked: !!contact, evidenceDetail, registryStatus, ...sim });
   } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
+    // 200 (not 5xx): upstream/GHL errors carry a useful message in the body, and
+    // proxies (Cloudflare, Render) replace any 5xx body with their own HTML page,
+    // which would hide it. The dashboard checks the `ok` field, not the status.
+    res.status(200).json({ ok: false, error: err.message });
   }
 });
 
@@ -290,7 +293,7 @@ api.post("/verify/register", async (req, res) => {
     });
     res.json({ ok: true, record });
   } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
+    res.status(200).json({ ok: false, error: err.message });
   }
 });
 
@@ -309,7 +312,7 @@ api.post("/test-channel", async (req, res) => {
     const result = await bridge.testChannel(req.body?.brokerKey, store.loadConfig());
     res.status(result.ok ? 200 : 422).json(result);
   } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
+    res.status(200).json({ ok: false, error: err.message });
   }
 });
 
@@ -322,7 +325,7 @@ api.post("/distribute", async (req, res) => {
     const result = await bridge.distributeLead({ contactId, brokerKey }, store.loadConfig());
     res.status(result.ok ? 200 : 422).json(result);
   } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
+    res.status(200).json({ ok: false, error: err.message });
   }
 });
 
@@ -333,7 +336,7 @@ api.post("/migrate/scan", async (req, res) => {
     });
     res.status(result.ok ? 200 : 422).json(result);
   } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
+    res.status(200).json({ ok: false, error: err.message });
   }
 });
 
@@ -348,7 +351,7 @@ api.post("/migrate/run", async (req, res) => {
     });
     res.status(result.ok ? 200 : 422).json(result);
   } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
+    res.status(200).json({ ok: false, error: err.message });
   }
 });
 
