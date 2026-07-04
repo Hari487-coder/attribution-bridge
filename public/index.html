@@ -65,6 +65,7 @@
 <nav>
   <button data-tab="precheck" class="active">Pre-check</button>
   <button data-tab="distribute">Distribute</button>
+  <button data-tab="bulk">Bulk import</button>
   <button data-tab="registry">Verified registry</button>
   <button data-tab="migrate">Backlog migration</button>
   <button data-tab="setup">Setup</button>
@@ -122,6 +123,27 @@
     <button class="action" id="tRun">Run channel test</button>
     <div id="tVerdict" class="verdict"></div>
     <pre id="tResult" class="result" style="display:none"></pre>
+  </div>
+</section>
+
+<!-- ── Bulk import ── -->
+<section id="tab-bulk">
+  <div class="card">
+    <h2>Bulk import: master → broker</h2>
+    <p class="hint">Pull existing contacts from your <b>master</b> account and create them in a broker sub-account through the API channel — for onboarding a new broker or backfilling leads that arrived before the webhook was wired. Each contact runs through the same verify-first pipeline: only genuinely opted-in leads are pushed, opt-outs are refused, and duplicates follow your duplicate policy. <b>Dry-run first.</b></p>
+    <label>Target broker</label>
+    <select id="bkBroker"></select>
+    <button class="action secondary" id="bkScan">Scan master account</button>
+    <div id="bkSummary" class="small" style="margin-top:10px"></div>
+    <div id="bkTableWrap" style="max-height:360px;overflow:auto"></div>
+    <div id="bkActions" style="display:none">
+      <label style="display:inline-block"><input type="checkbox" id="bkOnlyEligible" checked> only eligible (opted-in)</label>
+      <div style="margin-top:8px">
+        <button class="action secondary" id="bkDry">Dry-run selected</button>
+        <button class="action" id="bkPush">Push selected to broker</button>
+      </div>
+    </div>
+    <pre id="bkResult" class="result" style="display:none"></pre>
   </div>
 </section>
 
@@ -381,6 +403,7 @@ async function loadConfig() {
   brokerOptions($("dBroker"));
   brokerOptions($("tBroker"), { includeMaster: true });
   brokerOptions($("mBroker"));
+  brokerOptions($("bkBroker"));
 }
 
 $("cfgAddBroker").onclick = () => addBrokerRow();
@@ -559,6 +582,53 @@ async function runMigrate(dryRun) {
 $("mDry").onclick = () => runMigrate(true);
 $("mLive").onclick = () => runMigrate(false);
 
+// ── bulk import (master → broker) ──
+$("bkScan").onclick = async () => {
+  $("bkScan").disabled = true;
+  const r = await api("/master/scan", { method: "POST", body: {} });
+  $("bkScan").disabled = false;
+  if (!r.ok) return toast("scan failed: " + (r.error || "unknown"));
+  const eligible = r.contacts.filter((c) => c.verified).length;
+  $("bkSummary").innerHTML = `Scanned <b>${r.scanned}</b> master contacts — <b>${eligible}</b> eligible (opted-in), ${r.contacts.length - eligible} not.${r.truncated ? " (page limit hit — narrow down or raise maxPages.)" : ""}`;
+  const rows = r.contacts.map((c) => `<tr data-eligible="${c.verified}">
+      <td><input type="checkbox" class="bkSel" value="${esc(c.id)}" ${c.verified ? "checked" : ""}></td>
+      <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
+      <td>${c.verified ? `<span class="pill ok">${esc(c.evidence)}</span>` : `<span class="pill warn">not eligible</span>`}</td>
+      <td class="small">${esc(c.verified ? "" : c.reason || "")}</td>
+      <td class="mono small">${esc(c.id)}</td></tr>`).join("");
+  $("bkTableWrap").innerHTML = r.contacts.length
+    ? `<table><tr><th></th><th>Name</th><th>Phone</th><th>Opt-in</th><th>Reason (if not)</th><th>ID</th></tr>${rows}</table>`
+    : "<p class='small'>No contacts with phone numbers found in the master account.</p>";
+  $("bkActions").style.display = r.contacts.length ? "block" : "none";
+  applyEligibleFilter();
+};
+function applyEligibleFilter() {
+  const only = $("bkOnlyEligible").checked;
+  document.querySelectorAll("#bkTableWrap tr[data-eligible]").forEach((tr) => {
+    const elig = tr.dataset.eligible === "true";
+    tr.style.display = only && !elig ? "none" : "";
+    if (only && !elig) tr.querySelector(".bkSel").checked = false;
+  });
+}
+$("bkOnlyEligible").onchange = applyEligibleFilter;
+async function runBulk(dryRun) {
+  const ids = [...document.querySelectorAll(".bkSel:checked")].map((c) => c.value);
+  if (!ids.length) return toast("nothing selected");
+  const brokerKey = $("bkBroker").value;
+  if (!dryRun && !confirm(`Push ${ids.length} master contact(s) into "${brokerKey}"? Non-opted-in and opted-out contacts are refused automatically.`)) return;
+  $("bkDry").disabled = $("bkPush").disabled = true;
+  const r = await api("/master/push", { method: "POST", body: { brokerKey, contactIds: ids, dryRun } });
+  $("bkDry").disabled = $("bkPush").disabled = false;
+  $("bkResult").style.display = "block";
+  $("bkResult").textContent = JSON.stringify(r, null, 2);
+  if (r.ok && !dryRun) {
+    const bridged = r.results.filter((x) => x.action === "bridged").length;
+    toast(`Pushed: ${bridged} bridged of ${r.results.length}`);
+  }
+}
+$("bkDry").onclick = () => runBulk(true);
+$("bkPush").onclick = () => runBulk(false);
+
 // ── activity ──
 async function loadLog() {
   const r = await api("/log");
@@ -585,7 +655,9 @@ async function loadLog() {
          e.kind === "verify-register" ? `${e.phone} (${e.evidence})` :
          e.kind === "verify-withdraw" ? `${e.phone}` :
          e.kind === "migrate-run" ? `${e.recreated}/${e.total} recreated${e.dryRun ? " (dry)" : ""}` :
-         e.kind === "migrate-scan" ? `${e.candidates} candidates / ${e.scanned} scanned` : "");
+         e.kind === "migrate-scan" ? `${e.candidates} candidates / ${e.scanned} scanned` :
+         e.kind === "master-scan" ? `${e.eligible} eligible / ${e.scanned} scanned` :
+         e.kind === "master-push" ? `${e.bridged}/${e.total} bridged → ${e.brokerKey}${e.dryRun ? " (dry)" : ""}` : "");
       return `<tr><td class="mono small">${esc((e.at || "").replace("T", " ").slice(0, 19))}</td>
         <td>${esc(e.kind ?? "")}</td><td>${status}</td><td class="small">${esc(detail)}</td></tr>`;
     })

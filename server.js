@@ -355,6 +355,34 @@ api.post("/migrate/run", async (req, res) => {
   }
 });
 
+// ── Master → broker bulk import ──────────────────────────────────────────────
+
+api.post("/master/scan", async (req, res) => {
+  try {
+    const result = await bridge.masterScan(store.loadConfig(), {
+      maxPages: Number(req.body?.maxPages) || 10,
+    });
+    res.status(result.ok ? 200 : 422).json(result);
+  } catch (err) {
+    res.status(200).json({ ok: false, error: err.message });
+  }
+});
+
+api.post("/master/push", async (req, res) => {
+  const { brokerKey, contactIds, dryRun } = req.body ?? {};
+  if (!brokerKey || !Array.isArray(contactIds) || contactIds.length === 0) {
+    return res.status(400).json({ ok: false, error: "brokerKey and contactIds[] required" });
+  }
+  try {
+    const result = await bridge.masterPush(brokerKey, contactIds, store.loadConfig(), {
+      dryRun: dryRun !== false, // dry-run unless explicitly disabled
+    });
+    res.status(result.ok ? 200 : 422).json(result);
+  } catch (err) {
+    res.status(200).json({ ok: false, error: err.message });
+  }
+});
+
 app.use("/api", api);
 
 // ── UI ───────────────────────────────────────────────────────────────────────

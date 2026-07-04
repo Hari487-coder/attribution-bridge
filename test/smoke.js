@@ -130,6 +130,30 @@ const ok = (name, cond) => {
   try { verify.withdrawVerification("abc"); } catch { threw = true; }
   ok("junk phone rejected by withdraw", threw && !verify.isPlausiblePhone("abc"));
 
+  console.log("bulk import (master -> broker):");
+  // reset registry so opted-out numbers from earlier don't skew the scan
+  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  const scan = await bridge.masterScan(config);
+  ok("master scan returns contacts with eligibility", scan.ok && scan.contacts.length >= 3);
+  const scanCold = scan.contacts.find((c) => c.id === "master_cold_1");
+  const scanMeta = scan.contacts.find((c) => c.id === "master_meta_1");
+  ok("scan marks cold master contact not eligible", scanCold && scanCold.verified === false);
+  ok("scan marks integration master contact eligible", scanMeta && scanMeta.verified === true);
+
+  // dry-run push: opted-in → would-bridge, cold → would-refuse
+  const dry = await bridge.masterPush("broker-a", ["master_meta_1", "master_cold_1"], config, { dryRun: true });
+  ok("bulk dry-run: eligible would-bridge", dry.results.find((r) => r.id === "master_meta_1").action === "would-bridge");
+  ok("bulk dry-run: cold would-refuse", dry.results.find((r) => r.id === "master_cold_1").action === "would-refuse");
+
+  // live push of an eligible contact → success (bridged, or skipped if a prior
+  // test already bridged it — both mean it's now in the broker with evidence).
+  const live = await bridge.masterPush("broker-a", ["master_web_1"], config, { dryRun: false });
+  const act = live.results[0].action;
+  ok("bulk push succeeds for an eligible contact", live.ok && (act === "bridged" || act === "skipped"));
+  // a cold contact is refused by the pipeline, never created
+  const liveCold = await bridge.masterPush("broker-a", ["master_cold_1"], config, { dryRun: false });
+  ok("bulk push refuses a cold contact", liveCold.results[0].action === "refused");
+
   console.log(`\nALL ${pass} CHECKS PASSED`);
   process.exit(0);
 })().catch((err) => {
