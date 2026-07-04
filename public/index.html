@@ -230,6 +230,10 @@
         <select id="cfgCopyCf"><option value="true">yes</option><option value="false">no</option></select>
         <label>Bridge tag added to every created contact</label>
         <input id="cfgBridgeTag">
+        <label>Verified tag (white-label)</label>
+        <input id="cfgVerifiedTag" placeholder="assistable-verified">
+        <label>Verified note label (white-label)</label>
+        <input id="cfgVerifiedNoteLabel" placeholder="Assistable attribution verified via master account">
         <label>Require master opt-in evidence (safety gate)</label>
         <select id="cfgRequireEvidence">
           <option value="true">on — refuse to bridge non-opted-in leads (recommended)</option>
@@ -393,6 +397,8 @@ async function loadConfig() {
   $("cfgDupPolicy").value = CONFIG.settings.duplicatePolicy;
   $("cfgCopyCf").value = String(CONFIG.settings.copyCustomFields);
   $("cfgBridgeTag").value = CONFIG.settings.bridgeTag || "";
+  $("cfgVerifiedTag").value = CONFIG.settings.verifiedTag || "";
+  $("cfgVerifiedNoteLabel").value = CONFIG.settings.verifiedNoteLabel || "";
   $("cfgRequireEvidence").value = String(CONFIG.settings.requireMasterEvidence !== false);
   $("cfgCallingCode").value = CONFIG.settings.defaultCallingCode || "1";
   $("cfgSecretStatus").textContent = CONFIG.signingSecret === "(set)"
@@ -430,6 +436,8 @@ $("cfgSave").onclick = async () => {
         duplicatePolicy: $("cfgDupPolicy").value,
         copyCustomFields: $("cfgCopyCf").value === "true",
         bridgeTag: $("cfgBridgeTag").value.trim(),
+        verifiedTag: $("cfgVerifiedTag").value.trim() || undefined,
+        verifiedNoteLabel: $("cfgVerifiedNoteLabel").value.trim() || undefined,
         requireMasterEvidence: $("cfgRequireEvidence").value === "true",
         defaultCallingCode: ($("cfgCallingCode").value.trim() || "1").replace(/\D/g, "") || "1",
       },
