@@ -135,6 +135,12 @@
     <select id="bkBroker"></select>
     <button class="action secondary" id="bkScan">Scan master account</button>
     <div id="bkSummary" class="small" style="margin-top:10px"></div>
+    <div id="bkControls" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0">
+      <input id="bkSearch" placeholder="Search name or phone…" style="max-width:260px;margin:0">
+      <button class="action secondary" id="bkSelectAll" style="margin:0">Select all shown</button>
+      <button class="action secondary" id="bkSelectNone" style="margin:0">Deselect all</button>
+      <span class="small" id="bkSelCount"></span>
+    </div>
     <div id="bkTableWrap" style="max-height:360px;overflow:auto"></div>
     <div id="bkActions" style="display:none">
       <label style="display:inline-block"><input type="checkbox" id="bkOnlyEligible" checked> only eligible (opted-in)</label>
@@ -645,14 +651,37 @@ $("bkScan").onclick = async () => {
     $("bkActions").style.display = "none";
   }
 };
+function bkUpdateCount() {
+  const n = document.querySelectorAll("#bkTableWrap .bkSel:checked").length;
+  $("bkSelCount").textContent = n ? `${n} selected` : "";
+}
 function applyEligibleFilter() {
   const only = $("bkOnlyEligible").checked;
+  const q = ($("bkSearch").value || "").trim().toLowerCase();
+  $("bkControls").style.display = document.querySelector("#bkTableWrap tr[data-eligible]") ? "flex" : "none";
   document.querySelectorAll("#bkTableWrap tr[data-eligible]").forEach((tr) => {
     const elig = tr.dataset.eligible === "true";
-    tr.style.display = only && !elig ? "none" : "";
-    if (only && !elig) tr.querySelector(".bkSel").checked = false;
+    const text = tr.textContent.toLowerCase();
+    const hidden = (only && !elig) || (q && !text.includes(q));
+    tr.style.display = hidden ? "none" : "";
+    if (hidden) tr.querySelector(".bkSel").checked = false;
   });
+  bkUpdateCount();
 }
+$("bkSearch").oninput = applyEligibleFilter;
+$("bkSelectAll").onclick = () => {
+  document.querySelectorAll("#bkTableWrap tr[data-eligible]").forEach((tr) => {
+    if (tr.style.display !== "none") tr.querySelector(".bkSel").checked = true;
+  });
+  bkUpdateCount();
+};
+$("bkSelectNone").onclick = () => {
+  document.querySelectorAll("#bkTableWrap .bkSel").forEach((c) => (c.checked = false));
+  bkUpdateCount();
+};
+document.getElementById("bkTableWrap").addEventListener("change", (e) => {
+  if (e.target.classList.contains("bkSel")) bkUpdateCount();
+});
 $("bkOnlyEligible").onchange = applyEligibleFilter;
 async function runBulk(dryRun) {
   const ids = [...document.querySelectorAll(".bkSel:checked")].map((c) => c.value);
