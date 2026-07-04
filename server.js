@@ -1,7 +1,7 @@
 /**
  * Attribution Bridge — replaces GHL "Copy Contact" with API-channel creates so
  * broker-side contacts carry createdBy.source = "INTEGRATION" and pass
- * Assistable's DNC attribution check. Also: dry-run gate simulator + backlog
+ * CastigliaAI's DNC attribution check. Also: dry-run gate simulator + backlog
  * migration. See README.md.
  *
  * Run:  node server.js            (live)
@@ -213,7 +213,7 @@ api.get("/log", (req, res) => {
 });
 
 /**
- * POST /api/precheck — "would Assistable block this call?"
+ * POST /api/precheck — "would CastigliaAI block this call?"
  * Body: { phone } for number-only, or { brokerKey|"master", contactId } for the
  * full contact-aware simulation (DND + attribution + national DNC).
  */

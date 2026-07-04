@@ -59,7 +59,7 @@
 <body>
 <header>
   <h1>Attribution Bridge</h1>
-  <span class="sub">GHL lead distribution that survives Assistable's DNC attribution check</span>
+  <span class="sub">GHL lead distribution that survives CastigliaAI's DNC attribution check</span>
   <span id="mockBadge">MOCK MODE — no live GHL calls</span>
 </header>
 <nav>
@@ -77,7 +77,7 @@
 <!-- ── Pre-check ── -->
 <section id="tab-precheck" class="active">
   <div class="card">
-    <h2>Would Assistable block this call?</h2>
+    <h2>Would CastigliaAI block this call?</h2>
     <p class="hint">Replicates the exact production gate (DND → attribution evidence → national DNC registry) without placing a call. Number-only checks skip the contact-level steps.</p>
     <div class="row">
       <div>
@@ -231,9 +231,9 @@
         <label>Bridge tag added to every created contact</label>
         <input id="cfgBridgeTag">
         <label>Verified tag (white-label)</label>
-        <input id="cfgVerifiedTag" placeholder="assistable-verified">
+        <input id="cfgVerifiedTag" placeholder="castigliaai-verified">
         <label>Verified note label (white-label)</label>
-        <input id="cfgVerifiedNoteLabel" placeholder="Assistable attribution verified via master account">
+        <input id="cfgVerifiedNoteLabel" placeholder="CastigliaAI attribution verified via master account">
         <label>Require master opt-in evidence (safety gate)</label>
         <select id="cfgRequireEvidence">
           <option value="true">on — refuse to bridge non-opted-in leads (recommended)</option>
@@ -263,7 +263,7 @@
 <section id="tab-playbook">
   <div class="card">
     <h2>Why this works</h2>
-    <p class="hint" style="margin-bottom:6px">Assistable allows an outbound AI call to a national-DNC number only when the GHL contact shows opt-in evidence: populated <code>attributionSource</code>, populated <code>lastAttributionSource</code>, or <code>createdBy.source = "INTEGRATION"</code>. GHL's native "Copy Contact" produces none of these. Contacts <i>created via an API integration</i> get the INTEGRATION stamp — so this app replaces Copy Contact with an API create.</p>
+    <p class="hint" style="margin-bottom:6px">CastigliaAI allows an outbound AI call to a national-DNC number only when the GHL contact shows opt-in evidence: populated <code>attributionSource</code>, populated <code>lastAttributionSource</code>, or <code>createdBy.source = "INTEGRATION"</code>. GHL's native "Copy Contact" produces none of these. Contacts <i>created via an API integration</i> get the INTEGRATION stamp — so this app replaces Copy Contact with an API create.</p>
   </div>
   <div class="card">
     <h2>Rollout steps</h2>
@@ -273,7 +273,7 @@
       <li><b>Master GHL workflow</b> — replace the "Copy Contact" action with a Webhook action:<br>
         <code>POST https://&lt;your-host&gt;/webhook/lead?key=&lt;webhook key&gt;</code><br>
         JSON body: <code>{"contact_id": "{{contact.id}}", "broker_key": "&lt;key&gt;"}</code> — route the broker_key with workflow branches or a custom value.</li>
-      <li><b>Verify one lead end-to-end</b> — trigger a test lead, check the Activity tab shows <span class="pill ok">passes</span>, then confirm the AI call goes through in Assistable.</li>
+      <li><b>Verify one lead end-to-end</b> — trigger a test lead, check the Activity tab shows <span class="pill ok">passes</span>, then confirm the AI call goes through in CastigliaAI.</li>
       <li><b>Backlog</b> (Migration tab) — scan each broker, dry-run, then recreate the blocked copies.</li>
     </ol>
   </div>
@@ -287,7 +287,7 @@
       <li><b>Verify-first:</b> the bridge checks the <i>master</i> contact's genuine opt-in (attribution / real Meta integration / not-DND) — fields GHL sets and the customer can't forge — and refuses to bridge anything that fails. A cold contact dumped into the master won't pass.</li>
       <li><b>Signed &amp; workspace-scoped:</b> each verification is HMAC-signed and stored per phone, defensible across this master's brokers but never shared to unrelated workspaces.</li>
       <li><b>Opt-out always wins:</b> a withdrawal is never overridden by a later verification. Wire GHL's STOP/opt-out workflow to <code>/webhook/optout</code>.</li>
-      <li><b>Honest about enforcement:</b> Assistable does <i>not</i> read the signature — it still allows the call because of the <code>INTEGRATION</code> stamp the bridge applies. The security gain is the webapp <i>refusing to stamp</i> non-opted-in contacts. The signed note is an audit trail + a forward-compat hook if Assistable later adds real server-side verification.</li>
+      <li><b>Honest about enforcement:</b> CastigliaAI does <i>not</i> read the signature — it still allows the call because of the <code>INTEGRATION</code> stamp the bridge applies. The security gain is the webapp <i>refusing to stamp</i> non-opted-in contacts. The signed note is an audit trail + a forward-compat hook if CastigliaAI later adds real server-side verification.</li>
       <li><code>createdBy</code> is immutable → backlog migration deletes + recreates, which drops that contact's GHL history. Migrate only un-worked contacts. Standard fields, tags, and fieldKey-matched custom fields are preserved; conversations/tasks are not.</li>
     </ul>
   </div>

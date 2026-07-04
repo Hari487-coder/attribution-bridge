@@ -1,7 +1,7 @@
 # Attribution Bridge
 
 Self-hosted web app that lets GHL leads copied from a master sub-account into
-broker sub-accounts **pass Assistable's DNC attribution check** — no Assistable
+broker sub-accounts **pass CastigliaAI's DNC attribution check** — no CastigliaAI
 backend changes required.
 
 ## One-click deploy (recommended)
@@ -20,7 +20,7 @@ webhook key FIRST, then add your master + broker accounts.
 
 ## The problem it solves
 
-Assistable allows an outbound AI call to a national-DNC-registered number only
+CastigliaAI allows an outbound AI call to a national-DNC-registered number only
 when the GHL contact carries opt-in evidence: populated `attributionSource`,
 populated `lastAttributionSource`, or `createdBy.source === "INTEGRATION"`.
 GHL's native **Copy Contact** action produces a record with none of these, so
@@ -34,7 +34,7 @@ This app replaces Copy Contact with an API create.
 | Feature | What happens |
 |---|---|
 | **/webhook/lead** | Master GHL workflow posts `{contact_id, broker_key}` → app fetches the master contact, creates it in the mapped broker location via the GHL API (create, never upsert), verifies the stamp, logs the result. |
-| **Pre-check** | Simulates Assistable's exact gate (DND → attribution evidence → FreeDNCList national registry) for a phone/contact — the "dry-run DNC verification" — without placing a call. |
+| **Pre-check** | Simulates CastigliaAI's exact gate (DND → attribution evidence → FreeDNCList national registry) for a phone/contact — the "dry-run DNC verification" — without placing a call. |
 | **Channel test** | Creates + inspects + deletes a throwaway contact per broker to empirically confirm which `createdBy.source` your token type produces. |
 | **Bulk import** | Scans your **master** account, shows which contacts are opted-in, and (after a dry run) pushes selected ones into a broker through the verify-first pipeline — for onboarding a broker or backfilling leads from before the webhook. |
 | **Backlog migration** | Scans a broker for contacts that fail the evidence check, then (after a dry run) deletes + recreates them through the API channel. |
@@ -72,7 +72,7 @@ build step). `data/config.json` holds tokens — keep it out of git (see
 ## Honest limits
 
 - The pre-check replicates the platform hard-DNC list, per-contact DND,
-  attribution evidence, and the national registry. It **cannot** see Assistable's
+  attribution evidence, and the national registry. It **cannot** see CastigliaAI's
   internal per-subaccount DNC list (recorded opt-outs) or the imported-number
   bypass tenant setting — those can still change the real outcome, and the
   simulator says so in its `caveats`.
@@ -96,7 +96,7 @@ opt-in (attribution / a real Meta-IG integration / not-DND) — fields GHL sets 
 the customer can't forge. Each verification is HMAC-signed, workspace-scoped, and
 stored in `data/registry.json`. An **opt-out always wins**: withdrawals are sticky
 and never auto-resurrected, and are re-checked immediately before every write.
-Assistable does not read the signature — enforcement is the refusal plus the
+CastigliaAI does not read the signature — enforcement is the refusal plus the
 `INTEGRATION` stamp; the signed note is an audit trail and a forward-compat hook.
 
 - **Set your country code.** `settings.defaultCallingCode` (Setup tab, digits only)

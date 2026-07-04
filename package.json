@@ -1,7 +1,7 @@
 {
   "name": "attribution-bridge",
   "version": "1.0.0",
-  "description": "GHL master→broker lead distribution that preserves Assistable DNC attribution (createdBy.source=INTEGRATION), plus a DNC gate pre-check and backlog migration.",
+  "description": "GHL master→broker lead distribution that preserves CastigliaAI DNC attribution (createdBy.source=INTEGRATION), plus a DNC gate pre-check and backlog migration.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
