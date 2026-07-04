@@ -583,33 +583,59 @@ $("mDry").onclick = () => runMigrate(true);
 $("mLive").onclick = () => runMigrate(false);
 
 // ── bulk import (master → broker) ──
+// The scan fetches a full record per contact (GHL's list view omits attribution),
+// and GHL caps that at ~10/s — so a whole account can't be scanned in one request
+// without hitting the hosting proxy's ~100s timeout. We loop bounded batches,
+// appending rows as each returns, so nothing times out and progress is visible.
+let bkAll = [];
+function bkRowHtml(c) {
+  const pill = c.verified === true ? `<span class="pill ok">${esc(c.evidence)}</span>`
+    : c.verified === false ? `<span class="pill warn">not eligible</span>`
+    : `<span class="pill dim">unknown</span>`;
+  const state = c.verified === true ? "true" : c.verified === false ? "false" : "unknown";
+  return `<tr data-eligible="${state}">
+      <td><input type="checkbox" class="bkSel" value="${esc(c.id)}" ${c.verified === true ? "checked" : ""}></td>
+      <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
+      <td>${pill}</td><td class="small">${esc(c.reason || "")}</td>
+      <td class="mono small">${esc(c.id)}</td></tr>`;
+}
+function bkSummaryHtml(done) {
+  const elig = bkAll.filter((c) => c.verified === true).length;
+  const unk = bkAll.filter((c) => c.verified === null).length;
+  const noe = bkAll.length - elig - unk;
+  return `${done ? "Scanned" : "Scanning…"} <b>${bkAll.length}</b> master contacts — <b>${elig}</b> eligible (opted-in), ${noe} not eligible${unk ? `, ${unk} unchecked` : ""}${done ? "." : " so far…"}`;
+}
 $("bkScan").onclick = async () => {
   $("bkScan").disabled = true;
   const orig = $("bkScan").textContent;
-  $("bkScan").textContent = "Scanning… (fetching full contact details)";
-  const r = await api("/master/scan", { method: "POST", body: {} });
-  $("bkScan").disabled = false;
-  $("bkScan").textContent = orig;
-  if (!r.ok) return toast("scan failed: " + (r.error || "unknown"));
-  const eligible = r.contacts.filter((c) => c.verified === true).length;
-  const unknown = r.contacts.filter((c) => c.verified === null).length;
-  $("bkSummary").innerHTML = `Scanned <b>${r.scanned}</b> master contacts — <b>${eligible}</b> eligible (opted-in), ${r.contacts.length - eligible - unknown} not eligible${unknown ? `, ${unknown} couldn't be checked` : ""}.${r.truncated ? " (page limit hit — only the first pages were scanned.)" : ""}`;
-  const pill = (c) =>
-    c.verified === true ? `<span class="pill ok">${esc(c.evidence)}</span>`
-    : c.verified === false ? `<span class="pill warn">not eligible</span>`
-    : `<span class="pill dim">unknown</span>`;
-  const state = (c) => (c.verified === true ? "true" : c.verified === false ? "false" : "unknown");
-  const rows = r.contacts.map((c) => `<tr data-eligible="${state(c)}">
-      <td><input type="checkbox" class="bkSel" value="${esc(c.id)}" ${c.verified === true ? "checked" : ""}></td>
-      <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
-      <td>${pill(c)}</td>
-      <td class="small">${esc(c.reason || "")}</td>
-      <td class="mono small">${esc(c.id)}</td></tr>`).join("");
-  $("bkTableWrap").innerHTML = r.contacts.length
-    ? `<table><tr><th></th><th>Name</th><th>Phone</th><th>Opt-in</th><th>Reason (if not)</th><th>ID</th></tr>${rows}</table>`
-    : "<p class='small'>No contacts with phone numbers found in the master account.</p>";
-  $("bkActions").style.display = r.contacts.length ? "block" : "none";
-  applyEligibleFilter();
+  $("bkScan").textContent = "Scanning…";
+  bkAll = [];
+  $("bkTableWrap").innerHTML =
+    `<table id="bkTable"><tr><th></th><th>Name</th><th>Phone</th><th>Opt-in</th><th>Reason (if not)</th><th>ID</th></tr></table>`;
+  $("bkActions").style.display = "block";
+  let cursor = null;
+  let batches = 0;
+  try {
+    do {
+      const body = cursor ? { startAfterId: cursor.startAfterId, startAfter: cursor.startAfter } : {};
+      const r = await api("/master/scan", { method: "POST", body });
+      if (!r.ok) { toast("scan failed: " + (r.error || "unknown")); break; }
+      bkAll.push(...r.contacts);
+      const tbl = document.getElementById("bkTable");
+      if (tbl) tbl.insertAdjacentHTML("beforeend", r.contacts.map(bkRowHtml).join(""));
+      $("bkSummary").innerHTML = bkSummaryHtml(!r.nextCursor);
+      applyEligibleFilter();
+      cursor = r.nextCursor;
+      batches++;
+    } while (cursor && batches < 60);
+  } finally {
+    $("bkScan").disabled = false;
+    $("bkScan").textContent = orig;
+  }
+  if (!bkAll.length) {
+    $("bkTableWrap").innerHTML = "<p class='small'>No contacts with phone numbers found in the master account.</p>";
+    $("bkActions").style.display = "none";
+  }
 };
 function applyEligibleFilter() {
   const only = $("bkOnlyEligible").checked;

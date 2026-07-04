@@ -359,8 +359,11 @@ api.post("/migrate/run", async (req, res) => {
 
 api.post("/master/scan", async (req, res) => {
   try {
+    const b = req.body ?? {};
     const result = await bridge.masterScan(store.loadConfig(), {
-      maxPages: Number(req.body?.maxPages) || 10,
+      startAfterId: b.startAfterId,
+      startAfter: b.startAfter,
+      pages: Number(b.pages) || 3,
     });
     res.status(result.ok ? 200 : 422).json(result);
   } catch (err) {
