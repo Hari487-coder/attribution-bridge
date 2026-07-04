@@ -68,40 +68,45 @@ function webhookAuth(req, res, next) {
  * there in workflow webhooks) or a query param for per-broker webhook URLs.
  */
 app.post("/webhook/lead", webhookAuth, async (req, res) => {
+  const config = store.loadConfig();
   const body = req.body ?? {};
   const contactId =
     body.contact_id || body.contactId || body.customData?.contact_id || body.id || null;
-  const brokerKey =
+  let brokerKey =
     req.query.broker ||
     body.broker_key ||
     body.brokerKey ||
     body.customData?.broker_key ||
     null;
 
-  if (!contactId || !brokerKey) {
-    store.appendLog({
-      kind: "distribute",
-      ok: false,
-      error: "missing contact_id or broker_key",
-      receivedKeys: Object.keys(body),
-    });
-    return res.status(400).json({
-      ok: false,
-      error:
-        "Need contact_id and broker_key (in body, customData, or ?broker= query). " +
-        `Received body keys: ${Object.keys(body).join(", ") || "(none)"}`,
-    });
+  if (!contactId) {
+    store.appendLog({ kind: "distribute", ok: false, error: "missing contact_id", receivedKeys: Object.keys(body) });
+    return res.status(400).json({ ok: false, error: "Need contact_id (in body, customData, or as id)." });
   }
 
   try {
-    const result = await bridge.distributeLead(
-      { contactId, brokerKey },
-      store.loadConfig()
-    );
-    return res.status(result.ok ? 200 : 422).json(result);
+    // Auto-route by tag (SOP 3.3) when no explicit broker_key was sent: read the
+    // master contact's tags and match them against the tag→broker map.
+    let routed = null;
+    if (!brokerKey) {
+      if (!config.master?.token) {
+        return res.status(422).json({ ok: false, error: "No broker_key sent and master token not configured for tag routing." });
+      }
+      const master = await ghl.getContact(contactId, config.master.token);
+      routed = bridge.resolveBrokerByTags(master?.tags, config.settings);
+      brokerKey = routed.brokerKey;
+      if (!brokerKey) {
+        const info = { kind: "distribute", ok: false, contactId, routed: true, reason: routed.reason, tags: master?.tags ?? [] };
+        store.appendLog(info);
+        return res.status(422).json({ ok: false, routed: true, error: `Could not route contact: ${routed.reason}.` });
+      }
+    }
+
+    const result = await bridge.distributeLead({ contactId, brokerKey }, config);
+    return res.status(result.ok ? 200 : 422).json({ ...result, routedBy: routed ? `tag:${routed.matchedTag}` : "explicit" });
   } catch (err) {
     store.appendLog({ kind: "distribute", ok: false, brokerKey, contactId, error: err.message });
-    return res.status(502).json({ ok: false, error: err.message });
+    return res.status(200).json({ ok: false, error: err.message });
   }
 });
 

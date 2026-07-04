@@ -136,7 +136,8 @@
     <button class="action secondary" id="bkScan">Scan master account</button>
     <div id="bkSummary" class="small" style="margin-top:10px"></div>
     <div id="bkControls" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0">
-      <input id="bkSearch" placeholder="Search name or phone…" style="max-width:260px;margin:0">
+      <input id="bkSearch" placeholder="Search name or phone…" style="max-width:220px;margin:0">
+      <select id="bkTagFilter" style="max-width:200px;margin:0"><option value="">all tags</option></select>
       <button class="action secondary" id="bkSelectAll" style="margin:0">Select all shown</button>
       <button class="action secondary" id="bkSelectNone" style="margin:0">Deselect all</button>
       <span class="small" id="bkSelCount"></span>
@@ -218,6 +219,25 @@
     <button class="action secondary" id="cfgAddBroker">+ Add broker</button>
   </div>
   <div class="card">
+    <h2>Automated routing (tag → broker)</h2>
+    <p class="hint">When a webhook fires <b>without</b> a broker key, the contact's tags are matched here to pick the destination broker (SOP 3.3). A lead must also carry the distribution trigger tag below to be eligible.</p>
+    <label>Distribution trigger tag</label>
+    <input id="cfgDistTag" placeholder="adl" style="max-width:200px">
+    <div class="broker-grid" id="routeRows" style="grid-template-columns:1fr 1fr 34px;margin-top:12px">
+      <b class="small">Contact tag</b><b class="small">Routes to broker key</b><span></span>
+    </div>
+    <button class="action secondary" id="cfgAddRoute">+ Add routing rule</button>
+  </div>
+  <div class="card">
+    <h2>Per-broker webhook snippets</h2>
+    <p class="hint">Copy a broker's snippet and paste it into their GHL workflow as a Webhook action, in place of Copy Contact (SOP 3.3.2).</p>
+    <label>Broker</label>
+    <select id="snipBroker"></select>
+    <pre id="snipOut" class="result" style="margin-top:10px;white-space:pre;overflow-x:auto"></pre>
+    <button class="action secondary" id="snipCopy">Copy snippet</button>
+    <span class="small" id="snipCopied" style="margin-left:8px"></span>
+  </div>
+  <div class="card">
     <h2>Pipeline settings</h2>
     <div class="row">
       <div>
@@ -230,6 +250,7 @@
         <label>Duplicate policy (broker already has this phone)</label>
         <select id="cfgDupPolicy">
           <option value="skip">skip — log and leave the old copy</option>
+          <option value="strip">strip — clear old copy's phone/email, keep its history, create fresh</option>
           <option value="recreate">recreate — delete old copy, create fresh</option>
         </select>
         <label>Copy custom fields (matched by fieldKey)</label>
@@ -410,13 +431,49 @@ async function loadConfig() {
   $("cfgSecretStatus").textContent = CONFIG.signingSecret === "(set)"
     ? "Signing secret: set ✓ (used to sign verification records)"
     : "Signing secret: will be generated on first run";
+  $("cfgDistTag").value = CONFIG.settings.distributionTag || "";
   renderBrokerRows();
+  renderRouteRows();
   brokerOptions($("pcBroker"), { includeMaster: true, includeNone: true });
   brokerOptions($("dBroker"));
   brokerOptions($("tBroker"), { includeMaster: true });
   brokerOptions($("mBroker"));
   brokerOptions($("bkBroker"));
+  brokerOptions($("snipBroker"));
+  renderSnippet();
 }
+
+// ── routing rules (tag → broker) ──
+function addRouteRow(tag = "", brokerKey = "") {
+  const grid = $("routeRows");
+  const mk = (el, a = {}) => Object.assign(document.createElement(el), a);
+  const t = mk("input", { value: tag, placeholder: "meta-campaign-tag", className: "rtag rrow" });
+  const b = mk("input", { value: brokerKey, placeholder: "broker-key", className: "rbroker rrow" });
+  const del = mk("button", { textContent: "✕", className: "del rrow", title: "remove" });
+  [t, b, del].forEach((el) => grid.appendChild(el));
+  del.onclick = () => [t, b, del].forEach((el) => el.remove());
+}
+function renderRouteRows() {
+  $("routeRows").querySelectorAll(".rrow").forEach((r) => r.remove());
+  const map = CONFIG.settings.tagRouting || {};
+  for (const [tag, bk] of Object.entries(map)) addRouteRow(tag, bk);
+}
+$("cfgAddRoute").onclick = () => addRouteRow();
+
+// ── webhook snippet menu ──
+function renderSnippet() {
+  const bk = $("snipBroker").value;
+  if (!bk) { $("snipOut").textContent = "Configure a broker first."; return; }
+  const url = location.origin;
+  const key = CONFIG.webhookKey || "YOUR_WEBHOOK_KEY";
+  $("snipOut").textContent =
+    `POST ${url}/webhook/lead?key=${key}\n\n{\n  "contact_id": "{{contact.id}}",\n  "broker_key": "${bk}"\n}`;
+}
+$("snipBroker").onchange = renderSnippet;
+$("snipCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("snipOut").textContent); $("snipCopied").textContent = "copied ✓"; setTimeout(() => ($("snipCopied").textContent = ""), 2000); }
+  catch { $("snipCopied").textContent = "select + copy manually"; }
+};
 
 $("cfgAddBroker").onclick = () => addBrokerRow();
 
@@ -446,6 +503,14 @@ $("cfgSave").onclick = async () => {
         verifiedNoteLabel: $("cfgVerifiedNoteLabel").value.trim() || undefined,
         requireMasterEvidence: $("cfgRequireEvidence").value === "true",
         defaultCallingCode: ($("cfgCallingCode").value.trim() || "1").replace(/\D/g, "") || "1",
+        distributionTag: $("cfgDistTag").value.trim(),
+        tagRouting: (() => {
+          const m = {};
+          const tags = [...$("routeRows").querySelectorAll(".rtag")];
+          const bks = [...$("routeRows").querySelectorAll(".rbroker")];
+          tags.forEach((t, i) => { const k = t.value.trim(); const v = bks[i].value.trim(); if (k && v) m[k] = v; });
+          return m;
+        })(),
       },
     },
   });
@@ -607,11 +672,21 @@ function bkRowHtml(c) {
     : c.verified === false ? `<span class="pill warn">not eligible</span>`
     : `<span class="pill dim">unknown</span>`;
   const state = c.verified === true ? "true" : c.verified === false ? "false" : "unknown";
-  return `<tr data-eligible="${state}">
+  const tags = (c.tags || []).join(", ");
+  return `<tr data-eligible="${state}" data-tags="${esc((c.tags || []).join("|").toLowerCase())}">
       <td><input type="checkbox" class="bkSel" value="${esc(c.id)}" ${c.verified === true ? "checked" : ""}></td>
       <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
-      <td>${pill}</td><td class="small">${esc(c.reason || "")}</td>
+      <td>${pill}</td><td class="small">${esc(tags)}</td>
       <td class="mono small">${esc(c.id)}</td></tr>`;
+}
+function bkRefreshTagFilter() {
+  const sel = $("bkTagFilter");
+  const cur = sel.value;
+  const all = new Set();
+  bkAll.forEach((c) => (c.tags || []).forEach((t) => all.add(t)));
+  sel.innerHTML = '<option value="">all tags</option>' +
+    [...all].sort().map((t) => `<option value="${esc(t.toLowerCase())}">${esc(t)}</option>`).join("");
+  if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
 }
 function bkSummaryHtml(done) {
   const elig = bkAll.filter((c) => c.verified === true).length;
@@ -625,7 +700,7 @@ $("bkScan").onclick = async () => {
   $("bkScan").textContent = "Scanning…";
   bkAll = [];
   $("bkTableWrap").innerHTML =
-    `<table id="bkTable"><tr><th></th><th>Name</th><th>Phone</th><th>Opt-in</th><th>Reason (if not)</th><th>ID</th></tr></table>`;
+    `<table id="bkTable"><tr><th></th><th>Name</th><th>Phone</th><th>Opt-in</th><th>Tags</th><th>ID</th></tr></table>`;
   $("bkActions").style.display = "block";
   let cursor = null;
   let batches = 0;
@@ -638,6 +713,7 @@ $("bkScan").onclick = async () => {
       const tbl = document.getElementById("bkTable");
       if (tbl) tbl.insertAdjacentHTML("beforeend", r.contacts.map(bkRowHtml).join(""));
       $("bkSummary").innerHTML = bkSummaryHtml(!r.nextCursor);
+      bkRefreshTagFilter();
       applyEligibleFilter();
       cursor = r.nextCursor;
       batches++;
@@ -658,17 +734,20 @@ function bkUpdateCount() {
 function applyEligibleFilter() {
   const only = $("bkOnlyEligible").checked;
   const q = ($("bkSearch").value || "").trim().toLowerCase();
+  const tag = ($("bkTagFilter").value || "").toLowerCase();
   $("bkControls").style.display = document.querySelector("#bkTableWrap tr[data-eligible]") ? "flex" : "none";
   document.querySelectorAll("#bkTableWrap tr[data-eligible]").forEach((tr) => {
     const elig = tr.dataset.eligible === "true";
     const text = tr.textContent.toLowerCase();
-    const hidden = (only && !elig) || (q && !text.includes(q));
+    const rowTags = (tr.dataset.tags || "").split("|");
+    const hidden = (only && !elig) || (q && !text.includes(q)) || (tag && !rowTags.includes(tag));
     tr.style.display = hidden ? "none" : "";
     if (hidden) tr.querySelector(".bkSel").checked = false;
   });
   bkUpdateCount();
 }
 $("bkSearch").oninput = applyEligibleFilter;
+$("bkTagFilter").onchange = applyEligibleFilter;
 $("bkSelectAll").onclick = () => {
   document.querySelectorAll("#bkTableWrap tr[data-eligible]").forEach((tr) => {
     if (tr.style.display !== "none") tr.querySelector(".bkSel").checked = true;

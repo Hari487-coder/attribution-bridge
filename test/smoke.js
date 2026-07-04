@@ -154,6 +154,32 @@ const ok = (name, cond) => {
   const liveCold = await bridge.masterPush("broker-a", ["master_cold_1"], config, { dryRun: false });
   ok("bulk push refuses a cold contact", liveCold.results[0].action === "refused");
 
+  console.log("SOP features:");
+  // 3.1 — master scan returns tags
+  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  const scan2 = await bridge.masterScan(config);
+  const withTags = scan2.contacts.find((c) => Array.isArray(c.tags) && c.tags.length);
+  ok("master scan returns tags on contacts", !!withTags);
+
+  // 3.2 — "strip" policy: old dupe kept but phone/email cleared, new created.
+  // Uses the dedicated strip fixture (master_strip_1 + broker_strip_copy).
+  const ghl2 = require("../lib/ghl");
+  const stripCfg = { ...config, settings: { ...config.settings, duplicatePolicy: "strip" } };
+  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  const stripRes = await bridge.distributeLead({ contactId: "master_strip_1", brokerKey: "broker-a" }, stripCfg);
+  ok("strip policy creates a new contact", stripRes.ok && stripRes.brokerContactId);
+  ok("strip policy strips (not deletes) the old dupe", Array.isArray(stripRes.strippedDuplicates) && stripRes.strippedDuplicates.includes("broker_strip_copy") && stripRes.deletedDuplicates.length === 0);
+  const oldStripped = await ghl2.getContact("broker_strip_copy", "t").catch(() => null);
+  ok("stripped old contact still exists with cleared phone/email", oldStripped && oldStripped.phone === "" && oldStripped.email === "");
+
+  // 3.3 — tag→broker routing
+  const rSettings = { tagRouting: { "campaign-smith": "broker-smith", "campaign-jones": "broker-jones" }, distributionTag: "adl" };
+  ok("routing: matches a tag to a broker (with trigger)", bridge.resolveBrokerByTags(["adl", "campaign-jones"], rSettings).brokerKey === "broker-jones");
+  ok("routing: missing trigger tag → refused", bridge.resolveBrokerByTags(["campaign-jones"], rSettings).brokerKey === null);
+  ok("routing: no matching tag → refused", bridge.resolveBrokerByTags(["adl", "other"], rSettings).brokerKey === null);
+  ok("routing: case-insensitive", bridge.resolveBrokerByTags(["ADL", "Campaign-Smith"], rSettings).brokerKey === "broker-smith");
+  ok("routing: no trigger configured → tag alone routes", bridge.resolveBrokerByTags(["campaign-smith"], { tagRouting: { "campaign-smith": "broker-smith" }, distributionTag: "" }).brokerKey === "broker-smith");
+
   console.log(`\nALL ${pass} CHECKS PASSED`);
   process.exit(0);
 })().catch((err) => {
