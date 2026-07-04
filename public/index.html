@@ -585,16 +585,25 @@ $("mLive").onclick = () => runMigrate(false);
 // ── bulk import (master → broker) ──
 $("bkScan").onclick = async () => {
   $("bkScan").disabled = true;
+  const orig = $("bkScan").textContent;
+  $("bkScan").textContent = "Scanning… (fetching full contact details)";
   const r = await api("/master/scan", { method: "POST", body: {} });
   $("bkScan").disabled = false;
+  $("bkScan").textContent = orig;
   if (!r.ok) return toast("scan failed: " + (r.error || "unknown"));
-  const eligible = r.contacts.filter((c) => c.verified).length;
-  $("bkSummary").innerHTML = `Scanned <b>${r.scanned}</b> master contacts — <b>${eligible}</b> eligible (opted-in), ${r.contacts.length - eligible} not.${r.truncated ? " (page limit hit — narrow down or raise maxPages.)" : ""}`;
-  const rows = r.contacts.map((c) => `<tr data-eligible="${c.verified}">
-      <td><input type="checkbox" class="bkSel" value="${esc(c.id)}" ${c.verified ? "checked" : ""}></td>
+  const eligible = r.contacts.filter((c) => c.verified === true).length;
+  const unknown = r.contacts.filter((c) => c.verified === null).length;
+  $("bkSummary").innerHTML = `Scanned <b>${r.scanned}</b> master contacts — <b>${eligible}</b> eligible (opted-in), ${r.contacts.length - eligible - unknown} not eligible${unknown ? `, ${unknown} couldn't be checked` : ""}.${r.truncated ? " (page limit hit — only the first pages were scanned.)" : ""}`;
+  const pill = (c) =>
+    c.verified === true ? `<span class="pill ok">${esc(c.evidence)}</span>`
+    : c.verified === false ? `<span class="pill warn">not eligible</span>`
+    : `<span class="pill dim">unknown</span>`;
+  const state = (c) => (c.verified === true ? "true" : c.verified === false ? "false" : "unknown");
+  const rows = r.contacts.map((c) => `<tr data-eligible="${state(c)}">
+      <td><input type="checkbox" class="bkSel" value="${esc(c.id)}" ${c.verified === true ? "checked" : ""}></td>
       <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
-      <td>${c.verified ? `<span class="pill ok">${esc(c.evidence)}</span>` : `<span class="pill warn">not eligible</span>`}</td>
-      <td class="small">${esc(c.verified ? "" : c.reason || "")}</td>
+      <td>${pill(c)}</td>
+      <td class="small">${esc(c.reason || "")}</td>
       <td class="mono small">${esc(c.id)}</td></tr>`).join("");
   $("bkTableWrap").innerHTML = r.contacts.length
     ? `<table><tr><th></th><th>Name</th><th>Phone</th><th>Opt-in</th><th>Reason (if not)</th><th>ID</th></tr>${rows}</table>`
