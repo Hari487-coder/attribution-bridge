@@ -180,6 +180,23 @@ const ok = (name, cond) => {
   ok("routing: case-insensitive", bridge.resolveBrokerByTags(["ADL", "Campaign-Smith"], rSettings).brokerKey === "broker-smith");
   ok("routing: no trigger configured → tag alone routes", bridge.resolveBrokerByTags(["campaign-smith"], { tagRouting: { "campaign-smith": "broker-smith" }, distributionTag: "" }).brokerKey === "broker-smith");
 
+  console.log("review fixes:");
+  // routing multi-match → refuse (don't send to arbitrary broker)
+  const multi = bridge.resolveBrokerByTags(["adl", "vip", "campaign-jones"], { tagRouting: { vip: "broker-vip", "campaign-jones": "broker-jones" }, distributionTag: "adl" });
+  ok("routing: multiple distinct brokers → refuse", multi.brokerKey === null && /multiple routing tags/.test(multi.reason));
+  // two tags → SAME broker is fine
+  const same = bridge.resolveBrokerByTags(["adl", "a", "b"], { tagRouting: { a: "broker-x", b: "broker-x" }, distributionTag: "adl" });
+  ok("routing: multiple tags → same broker routes", same.brokerKey === "broker-x");
+
+  // strip must abort BEFORE mutating when the number is opted out (critical fix)
+  verify.withdrawVerification("+15559990002", "test opt-out");
+  const src = { id: "master_strip_2", phone: "+15559990002", tags: [] };
+  const brokerObj = { locationId: "loc_broker_a", token: "t", label: "b" };
+  const wres = await bridge.recreateInBroker(src, "loc_master", "t", brokerObj, { duplicatePolicy: "strip", bridgeTag: "x" }, { evidence: "integration_created" });
+  ok("strip: opt-out aborts before mutating", wres.refused === true && wres.step === "withdrawn-midflight");
+  const copy2 = await require("../lib/ghl").getContact("broker_strip_copy2", "t");
+  ok("strip: old dupe NOT stripped when opted out (phone intact)", copy2.phone === "+15559990002");
+
   console.log(`\nALL ${pass} CHECKS PASSED`);
   process.exit(0);
 })().catch((err) => {

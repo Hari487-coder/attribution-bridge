@@ -727,8 +727,14 @@ $("bkScan").onclick = async () => {
     $("bkActions").style.display = "none";
   }
 };
+// Selected = checked AND currently visible (hidden rows are excluded from the push).
+function bkSelectedIds() {
+  return [...document.querySelectorAll("#bkTableWrap tr[data-eligible]")]
+    .filter((tr) => tr.style.display !== "none" && tr.querySelector(".bkSel").checked)
+    .map((tr) => tr.querySelector(".bkSel").value);
+}
 function bkUpdateCount() {
-  const n = document.querySelectorAll("#bkTableWrap .bkSel:checked").length;
+  const n = bkSelectedIds().length;
   $("bkSelCount").textContent = n ? `${n} selected` : "";
 }
 function applyEligibleFilter() {
@@ -741,8 +747,9 @@ function applyEligibleFilter() {
     const text = tr.textContent.toLowerCase();
     const rowTags = (tr.dataset.tags || "").split("|");
     const hidden = (only && !elig) || (q && !text.includes(q)) || (tag && !rowTags.includes(tag));
+    // Pure view op: only toggle visibility, never mutate the checkbox — so
+    // clearing a filter restores the full selection (hidden rows aren't pushed).
     tr.style.display = hidden ? "none" : "";
-    if (hidden) tr.querySelector(".bkSel").checked = false;
   });
   bkUpdateCount();
 }
@@ -763,7 +770,7 @@ document.getElementById("bkTableWrap").addEventListener("change", (e) => {
 });
 $("bkOnlyEligible").onchange = applyEligibleFilter;
 async function runBulk(dryRun) {
-  const ids = [...document.querySelectorAll(".bkSel:checked")].map((c) => c.value);
+  const ids = bkSelectedIds();
   if (!ids.length) return toast("nothing selected");
   const brokerKey = $("bkBroker").value;
   if (!dryRun && !confirm(`Push ${ids.length} master contact(s) into "${brokerKey}"? Non-opted-in and opted-out contacts are refused automatically.`)) return;
