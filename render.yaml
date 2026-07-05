@@ -9,6 +9,7 @@ services:
     plan: starter
     buildCommand: npm install
     startCommand: node server.js
+    healthCheckPath: /healthz
     envVars:
       - key: DATA_DIR
         value: /var/data

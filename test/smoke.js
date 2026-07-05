@@ -197,6 +197,58 @@ const ok = (name, cond) => {
   const copy2 = await require("../lib/ghl").getContact("broker_strip_copy2", "t");
   ok("strip: old dupe NOT stripped when opted out (phone intact)", copy2.phone === "+15559990002");
 
+  console.log("Tier 1 ops:");
+  const backup = require("../lib/backup");
+  const stats = require("../lib/stats");
+  // backup bundle round-trips config + registry
+  verify.registerVerification({ phone: "+15553334444", evidence: "integration_created", masterContactId: "mb1" });
+  const bundle = backup.buildBundle();
+  ok("backup bundle has config + registry", bundle.config && bundle.registry && bundle.kind === "attribution-bridge-backup");
+  ok("bundle includes the just-registered number", !!bundle.registry[verify.registryKey("+15553334444")]);
+  // wipe registry, restore, confirm it comes back
+  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  ok("registry wiped", verify.isVerified("+15553334444") === null);
+  const rest = backup.restoreBundle(bundle);
+  ok("restore succeeds", rest.ok === true);
+  ok("restore brings the number back", verify.isVerified("+15553334444") !== null);
+  // restore rejects a non-bundle
+  ok("restore rejects junk", backup.restoreBundle({ foo: 1 }).ok === false);
+  // snapshot writes + lists
+  const snap = backup.writeSnapshot("test");
+  ok("snapshot written", snap.ok && backup.listSnapshots().length >= 1);
+  // stats aggregates the distributes done above
+  const summary = stats.summarize({});
+  ok("stats summarize returns a funnel", summary.totals && typeof summary.totals.received === "number" && summary.totals.received > 0);
+  ok("stats tracks lastActivityAt", typeof summary.lastActivityAt === "string");
+
+  console.log("Tier 1 review fixes:");
+  // lastActivityAt() tail reader (used by /healthz) — must not read the whole log,
+  // and must return the most recent entry's timestamp.
+  const tailAt = stats.lastActivityAt();
+  ok("lastActivityAt tail read returns an ISO timestamp", typeof tailAt === "string" && tailAt === summary.lastActivityAt);
+
+  // OPT-OUT ALWAYS WINS across a restore: a number withdrawn AFTER a bundle was
+  // taken must stay withdrawn even though the bundle recorded it as active.
+  verify.registerVerification({ phone: "+15557778888", evidence: "integration_created", masterContactId: "mo1" });
+  const activeBundle = backup.buildBundle(); // captures +15557778888 as active
+  verify.withdrawVerification("+15557778888", "opted out after backup");
+  ok("number is withdrawn before restore", verify.isWithdrawn("+15557778888") === true);
+  const merged = backup.restoreBundle(activeBundle);
+  ok("restore of the older bundle succeeds", merged.ok === true);
+  ok("restore does NOT resurrect the opt-out", verify.isWithdrawn("+15557778888") === true && verify.isVerified("+15557778888") === null);
+
+  // Restore must REFUSE (and change nothing) if the pre-restore snapshot can't be
+  // written — never destroy the only good copy. Force the real writeSnapshot to
+  // fail by putting a FILE where its backups/ directory needs to be (mkdir throws).
+  const goodBundle = backup.buildBundle();
+  const before = fs.readFileSync(verify.REGISTRY_PATH, "utf8");
+  fs.rmSync(backup.BACKUP_DIR, { recursive: true, force: true });
+  fs.writeFileSync(backup.BACKUP_DIR, "not a directory");
+  const refused = backup.restoreBundle(goodBundle);
+  fs.rmSync(backup.BACKUP_DIR, { force: true }); // clean up the blocking file
+  ok("restore refuses when the pre-restore snapshot fails", refused.ok === false && /pre-restore snapshot/.test(refused.error));
+  ok("refused restore left the registry untouched", fs.readFileSync(verify.REGISTRY_PATH, "utf8") === before);
+
   console.log(`\nALL ${pass} CHECKS PASSED`);
   process.exit(0);
 })().catch((err) => {

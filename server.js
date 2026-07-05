@@ -17,11 +17,53 @@ const compliance = require("./lib/compliance");
 const bridge = require("./lib/bridge");
 const store = require("./lib/store");
 const verify = require("./lib/verify");
+const backup = require("./lib/backup");
+const stats = require("./lib/stats");
+const scheduler = require("./lib/scheduler");
+const fs = require("node:fs");
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+// Only the restore endpoint accepts a large body (a full backup bundle). Every
+// other route — including the pre-auth webhooks — gets a tight limit so an
+// unauthenticated caller can't make the server buffer/parse a big payload.
+const jsonSmall = express.json({ limit: "1mb" });
+const jsonLarge = express.json({ limit: "8mb" });
+app.use((req, res, next) => (req.path === "/api/restore" ? jsonLarge : jsonSmall)(req, res, next));
 
+const BOOT_AT = new Date().toISOString();
 const PORT = Number(process.env.PORT || 3344);
+
+// ── Public health check (BEFORE auth, so external monitors can probe) ─────────
+// No secrets — booleans and counts only.
+app.get("/healthz", (_req, res) => {
+  let diskWritable = false;
+  try {
+    const probe = path.join(store.DATA_DIR, ".healthz-probe");
+    fs.mkdirSync(store.DATA_DIR, { recursive: true });
+    fs.writeFileSync(probe, "ok");
+    fs.unlinkSync(probe);
+    diskWritable = true;
+  } catch {
+    diskWritable = false;
+  }
+  let cfg = {};
+  try {
+    cfg = store.loadConfig();
+  } catch {
+    cfg = {};
+  }
+  const configured = !!(cfg.master?.token && Object.keys(cfg.brokers || {}).length);
+  const ok = diskWritable; // the one thing that must be true for the pipeline to work
+  res.status(ok ? 200 : 503).json({
+    ok,
+    mock: ghl.isMock(),
+    diskWritable,
+    configured,
+    brokerCount: Object.keys(cfg.brokers || {}).length,
+    lastActivityAt: stats.lastActivityAt(), // tail-read only — never parses the whole log
+    bootAt: BOOT_AT,
+  });
+});
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -96,7 +138,10 @@ app.post("/webhook/lead", webhookAuth, async (req, res) => {
       routed = bridge.resolveBrokerByTags(master?.tags, config.settings);
       brokerKey = routed.brokerKey;
       if (!brokerKey) {
-        const info = { kind: "distribute", ok: false, contactId, routed: true, reason: routed.reason, tags: master?.tags ?? [] };
+        // A routing miss is an intentional non-distribution (lead lacks the
+        // trigger/broker tag), not a bridge failure — mark it skipped so it
+        // doesn't inflate the error funnel or trigger a false failure alert.
+        const info = { kind: "distribute", ok: false, skipped: true, contactId, routed: true, reason: routed.reason, tags: master?.tags ?? [] };
         store.appendLog(info);
         return res.status(422).json({ ok: false, routed: true, error: `Could not route contact: ${routed.reason}.` });
       }
@@ -210,11 +255,55 @@ api.post("/config", (req, res) => {
   }
 
   store.saveConfig(next);
+  // Snapshot on every successful config change so an accidental clobber is undoable.
+  backup.writeSnapshot("config-save");
   res.json({ ok: true, config: store.redactConfig(next) });
 });
 
 api.get("/log", (req, res) => {
   res.json({ ok: true, entries: store.readLog({ limit: Number(req.query.limit) || 200 }) });
+});
+
+// ── Ops: metrics, backup/restore, alerts (Tier 1) ────────────────────────────
+
+api.get("/stats", (req, res) => {
+  const sinceIso = req.query.since || new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  res.json({ ok: true, ...stats.summarize({ sinceIso }) });
+});
+
+// Download a full backup bundle (contains live tokens — admin-authed only).
+api.get("/backup", (_req, res) => {
+  const bundle = backup.buildBundle();
+  const stamp = bundle.at.replace(/[:.]/g, "-");
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="attribution-bridge-backup-${stamp}.json"`);
+  res.send(JSON.stringify(bundle, null, 2));
+});
+
+api.post("/backup/now", async (_req, res) => {
+  const snap = backup.writeSnapshot("manual");
+  const cfg = store.loadConfig();
+  let offbox = { ok: false, error: "no backupWebhookUrl configured" };
+  if (cfg.settings?.backupWebhookUrl) offbox = await backup.pushOffbox(cfg.settings.backupWebhookUrl);
+  res.json({ ok: true, snapshot: snap, offbox, snapshots: backup.listSnapshots().length });
+});
+
+api.post("/restore", (req, res) => {
+  const r = backup.restoreBundle(req.body);
+  if (!r.ok) return res.status(400).json({ ok: false, error: r.error });
+  res.json({ ok: true, restoredFrom: r.at, brokers: r.brokers, note: "config + registry restored; a pre-restore snapshot was saved." });
+});
+
+api.post("/alert/test", async (_req, res) => {
+  const cfg = store.loadConfig();
+  const url = cfg.settings?.alertWebhookUrl;
+  if (!url) return res.status(400).json({ ok: false, error: "Set an alert webhook URL in Setup first." });
+  try {
+    await scheduler.sendDigest(url);
+    res.json({ ok: true, sentTo: url });
+  } catch (e) {
+    res.status(200).json({ ok: false, error: e.message });
+  }
 });
 
 /**
@@ -399,6 +488,7 @@ app.use("/", dashboardAuth, express.static(path.join(__dirname, "public")));
 
 app.listen(PORT, () => {
   verify.ensureSigningSecret(); // generate the registry HMAC secret once
+  if (!ghl.isMock()) scheduler.start(); // digest/alerts/backup — skip in mock/tests
   const mode = ghl.isMock() ? "MOCK (no GHL calls)" : "LIVE";
   console.log(`attribution-bridge listening on http://localhost:${PORT} [${mode}]`);
 });

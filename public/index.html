@@ -271,9 +271,31 @@
         <div class="small" style="color:var(--dim)">Digits only, no +. "1" = US/Canada. Set to your country (e.g. 44 UK, 61 AU) so a national-format opt-out matches an E.164 record.</div>
         <div class="small" id="cfgSecretStatus" style="margin-top:6px"></div>
       </div>
+        <label>Alerts &amp; digest webhook URL (a URL you own — e.g. a GHL inbound webhook)</label>
+        <input id="cfgAlertUrl" placeholder="https://…  (failure alerts + daily heartbeat digest)">
+        <label>Off-box backup webhook URL (receives the nightly backup bundle — contains tokens, keep private)</label>
+        <input id="cfgBackupUrl" placeholder="https://…  (optional)">
+        <label>Daily digest / backup hour (UTC, 0–23)</label>
+        <input id="cfgDigestHour" placeholder="13" style="max-width:120px">
+      </div>
     </div>
     <button class="action" id="cfgSave">Save configuration</button>
     <div class="small" id="cfgSaved" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
+    <h2>Backups &amp; health</h2>
+    <p class="hint">Your config (broker tokens, routing) and the opt-out registry live on this instance's disk. <b>Download a backup after setup and any change</b> — a restore is a 30-second recovery if the disk is ever wiped. Backups contain live tokens; keep the file private.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="action secondary" id="bkupDownload" style="margin:0">Download backup</button>
+      <button class="action secondary" id="bkupNow" style="margin:0">Snapshot now</button>
+      <label style="display:inline-flex;align-items:center;gap:6px;margin:0;cursor:pointer" class="action secondary">
+        <span>Restore from file…</span>
+        <input id="bkupRestoreFile" type="file" accept="application/json,.json" style="display:none">
+      </label>
+      <button class="action secondary" id="alertTest" style="margin:0">Send test digest</button>
+    </div>
+    <div class="small" id="bkupMsg" style="margin-top:8px"></div>
+    <div class="small" id="healthMsg" style="margin-top:6px"></div>
   </div>
 </section>
 
@@ -485,6 +507,9 @@ async function loadConfig() {
     ? "Signing secret: set ✓ (used to sign verification records)"
     : "Signing secret: will be generated on first run";
   $("cfgDistTag").value = CONFIG.settings.distributionTag || "";
+  $("cfgAlertUrl").value = CONFIG.settings.alertWebhookUrl || "";
+  $("cfgBackupUrl").value = CONFIG.settings.backupWebhookUrl || "";
+  $("cfgDigestHour").value = CONFIG.settings.digestHourUtc ?? 13;
   renderBrokerRows();
   renderRouteRows();
   brokerOptions($("pcBroker"), { includeMaster: true, includeNone: true });
@@ -494,6 +519,7 @@ async function loadConfig() {
   brokerOptions($("bkBroker"));
   brokerOptions($("snipBroker"));
   renderSnippet();
+  loadHealth();
 }
 
 // ── routing rules (tag → broker) ──
@@ -558,6 +584,9 @@ $("cfgSave").onclick = async () => {
         requireMasterEvidence: $("cfgRequireEvidence").value === "true",
         defaultCallingCode: ($("cfgCallingCode").value.trim() || "1").replace(/\D/g, "") || "1",
         distributionTag: $("cfgDistTag").value.trim(),
+        alertWebhookUrl: $("cfgAlertUrl").value.trim(),
+        backupWebhookUrl: $("cfgBackupUrl").value.trim(),
+        digestHourUtc: Math.max(0, Math.min(23, Number($("cfgDigestHour").value) || 13)),
         tagRouting: (() => {
           const m = {};
           const tags = [...$("routeRows").querySelectorAll(".rtag")];
@@ -573,6 +602,45 @@ $("cfgSave").onclick = async () => {
     await loadConfig();
   } else toast("save failed: " + (r.error || "unknown"));
 };
+
+// ── backups, alerts & health ──
+$("bkupDownload").onclick = () => {
+  // Hit the download endpoint via a hidden link so the browser saves the file.
+  const a = document.createElement("a");
+  a.href = "/api/backup";
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  $("bkupMsg").textContent = "Backup downloading — store it somewhere safe (it contains your tokens).";
+};
+$("bkupNow").onclick = async () => {
+  const r = await api("/backup/now", { method: "POST", body: {} });
+  $("bkupMsg").textContent = r.ok
+    ? `Snapshot saved (${r.snapshots} on disk)${r.offbox?.ok ? " + pushed off-box ✓" : r.offbox?.error && r.offbox.error !== "no backupWebhookUrl configured" ? " · off-box push failed: " + r.offbox.error : ""}`
+    : "Snapshot failed: " + (r.error || "unknown");
+};
+$("bkupRestoreFile").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (!confirm(`Restore config + registry from "${file.name}"? Your current config is snapshotted first, so this is undoable.`)) { e.target.value = ""; return; }
+  let bundle;
+  try { bundle = JSON.parse(await file.text()); } catch { $("bkupMsg").textContent = "That file isn't valid JSON."; e.target.value = ""; return; }
+  const r = await api("/restore", { method: "POST", body: bundle });
+  e.target.value = "";
+  if (r.ok) { $("bkupMsg").textContent = `Restored ${r.brokers} broker(s) from ${r.restoredFrom || "backup"} ✓ — reloading…`; setTimeout(loadConfig, 800); }
+  else $("bkupMsg").textContent = "Restore failed: " + (r.error || "unknown");
+};
+$("alertTest").onclick = async () => {
+  const r = await api("/alert/test", { method: "POST", body: {} });
+  $("bkupMsg").textContent = r.ok ? "Test digest sent ✓ — check the destination you configured." : "Test failed: " + (r.error || "unknown");
+};
+async function loadHealth() {
+  try {
+    const h = await (await fetch("/healthz")).json();
+    $("healthMsg").innerHTML = `Health: ${h.ok ? '<span class="pill ok">ok</span>' : '<span class="pill bad">degraded</span>'} · disk ${h.diskWritable ? "writable ✓" : "NOT writable ✗"} · ${h.configured ? "configured" : "not configured"} · ${h.brokerCount} broker(s)`;
+  } catch { $("healthMsg").textContent = ""; }
+}
 
 // ── verified registry ──
 async function loadRegistry() {
