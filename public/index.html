@@ -212,7 +212,7 @@
   </div>
   <div class="card">
     <h2>Brokers</h2>
-    <p class="hint">One row per broker sub-account. The <b>key</b> is what the master workflow sends as <code>broker_key</code>.</p>
+    <p class="hint">One row per broker sub-account. The <b>key</b> is what the master workflow sends as <code>broker_key</code>. Each row shows its ready-to-paste webhook snippet as soon as you type a key — set the webhook key below first.</p>
     <div class="broker-grid" id="brokerRows">
       <b class="small">Key</b><b class="small">Location ID</b><b class="small">API token</b><span></span>
     </div>
@@ -398,6 +398,17 @@ function renderBrokerRows() {
   }
 }
 
+// The webhook snippet for a broker only needs its key + the current webhook
+// key field (even if not saved yet) + this page's own origin — nothing else
+// has to be saved first, so it can render live as the operator types.
+function brokerWebhookSnippet(brokerKey) {
+  const key = ($("cfgWebhookKey")?.value || "").trim();
+  const bk = (brokerKey || "").trim();
+  if (!bk) return "Type a broker key above to generate its webhook snippet.";
+  if (!key) return "Set a webhook key below (Pipeline settings) to generate this snippet.";
+  return `POST ${location.origin}/webhook/lead?key=${key}\n\n{\n  "contact_id": "{{contact.id}}",\n  "broker_key": "${bk}"\n}`;
+}
+
 function addBrokerRow(key = "", loc = "", tok = "") {
   const grid = $("brokerRows");
   const mk = (el, attrs = {}) => Object.assign(document.createElement(el), attrs);
@@ -409,7 +420,49 @@ function addBrokerRow(key = "", loc = "", tok = "") {
     el.classList.add("brow");
     grid.appendChild(el);
   });
-  del.onclick = () => [kIn, lIn, tIn, del].forEach((el) => el.remove());
+
+  // Full-width row directly under this broker: its ready-to-paste webhook
+  // snippet, live-updating as the key changes — no save required first.
+  const snipWrap = mk("div", { className: "brow bwrow" });
+  snipWrap.style.gridColumn = "1 / -1";
+  snipWrap.style.margin = "0 0 8px";
+  const snipPre = mk("pre", {
+    className: "small",
+    style:
+      "background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px 10px;" +
+      "white-space:pre-wrap;word-break:break-all;margin:0 0 4px;font-family:var(--mono);font-size:11.5px;",
+  });
+  const copyBtn = mk("button", { className: "action secondary", textContent: "Copy webhook", style: "margin:0;padding:4px 10px;font-size:11.5px" });
+  const copiedMsg = mk("span", { className: "small", style: "margin-left:8px" });
+  copyBtn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(snipPre.textContent);
+      copiedMsg.textContent = "copied ✓";
+    } catch {
+      copiedMsg.textContent = "select + copy manually";
+    }
+    setTimeout(() => (copiedMsg.textContent = ""), 2000);
+  };
+  snipWrap.append(snipPre, copyBtn, copiedMsg);
+  grid.appendChild(snipWrap);
+
+  const refresh = () => {
+    snipPre.textContent = brokerWebhookSnippet(kIn.value);
+  };
+  refresh();
+  kIn.addEventListener("input", refresh);
+  // Changing the shared webhook key affects every row's snippet.
+  brokerSnippetRefreshers.push(refresh);
+
+  del.onclick = () => {
+    [kIn, lIn, tIn, del, snipWrap].forEach((el) => el.remove());
+    const i = brokerSnippetRefreshers.indexOf(refresh);
+    if (i !== -1) brokerSnippetRefreshers.splice(i, 1);
+  };
+}
+const brokerSnippetRefreshers = [];
+function refreshAllBrokerSnippets() {
+  brokerSnippetRefreshers.forEach((fn) => fn());
 }
 
 async function loadConfig() {
@@ -476,6 +529,7 @@ $("snipCopy").onclick = async () => {
 };
 
 $("cfgAddBroker").onclick = () => addBrokerRow();
+$("cfgWebhookKey").oninput = refreshAllBrokerSnippets;
 
 $("cfgSave").onclick = async () => {
   const grid = $("brokerRows");
