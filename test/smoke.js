@@ -153,6 +153,24 @@ const ok = (name, cond) => {
   const bridgedContact = tagRun.brokerContactId ? await ghl.getContact(tagRun.brokerContactId, "t") : null;
   ok("end-to-end: bridged broker contact carries the configured master tag", !!bridgedContact && (bridgedContact.tags || []).includes("meta-lead"));
 
+  console.log("backlog tag filter (Anthony — exclude Sold):");
+  const F = bridge.contactPassesTagFilter;
+  ok("no filter → passes", F(["veterans", "fb lead"], {}) === true);
+  ok("exclude Sold → hides a sold contact", F(["veterans", "Sold"], { excludeTags: ["sold"] }) === false);
+  ok("exclude is case-insensitive", F(["SOLD"], { excludeTags: ["sold"] }) === false);
+  ok("exclude → keeps a non-sold contact", F(["veterans", "fb lead"], { excludeTags: ["sold"] }) === true);
+  ok("include list → keeps a matching contact", F(["veterans", "ohio"], { includeTags: ["veterans"] }) === true);
+  ok("include list → drops a non-matching contact", F(["ohio", "fb lead"], { includeTags: ["veterans"] }) === false);
+  ok("exclude wins over include", F(["veterans", "sold"], { includeTags: ["veterans"], excludeTags: ["sold"] }) === false);
+  ok("empty tags + include list → dropped", F([], { includeTags: ["veterans"] }) === false);
+  ok("empty tags + no filter → passes", F([], {}) === true);
+  // Integration: migrateScan applies the filter and reports hiddenByTag.
+  const scanCfgF = { brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, master: { locationId: "loc_master", token: "t" }, settings: {} };
+  const scanBase = await bridge.migrateScan("broker-a", scanCfgF, {});
+  const scanUnmatched = await bridge.migrateScan("broker-a", scanCfgF, { includeTags: ["no-contact-has-this-xyz"] });
+  ok("migrateScan includeTags unmatched → 0 candidates, all baseline hidden",
+    scanUnmatched.ok && scanUnmatched.candidates.length === 0 && scanUnmatched.hiddenByTag === scanBase.candidates.length);
+
   console.log("review fixes:");
   // FIX (critical): international opt-out matches across national/E.164 formats.
   // Default calling code "1" (NANP): withdraw national 10-digit == E.164 +1.

@@ -425,8 +425,11 @@ api.post("/distribute", async (req, res) => {
 
 api.post("/migrate/scan", async (req, res) => {
   try {
-    const result = await bridge.migrateScan(req.body?.brokerKey, store.loadConfig(), {
-      maxPages: Number(req.body?.maxPages) || 10,
+    const b = req.body ?? {};
+    const result = await bridge.migrateScan(b.brokerKey, store.loadConfig(), {
+      maxPages: Number(b.maxPages) || 10,
+      includeTags: Array.isArray(b.includeTags) ? b.includeTags : [],
+      excludeTags: Array.isArray(b.excludeTags) ? b.excludeTags : [],
     });
     res.status(result.ok ? 200 : 422).json(result);
   } catch (err) {

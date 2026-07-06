@@ -189,6 +189,12 @@
     <p class="hint">Existing copies made with GHL "Copy Contact" keep their old stamp forever (createdBy is immutable). This scans a broker location for contacts that would fail the evidence check, then deletes + recreates them through the API channel. <b>Dry-run first, always.</b></p>
     <label>Broker</label>
     <select id="mBroker"></select>
+    <label>Exclude broker contacts tagged (optional, comma-separated)</label>
+    <input id="mExclude" placeholder="e.g. sold, closed, dnc">
+    <div class="small" style="color:var(--dim);margin-bottom:6px">Contacts already carrying one of these tags in the broker are hidden — so a sold/closed lead won't show as re-writable.</div>
+    <label>Only include broker contacts tagged (optional, comma-separated)</label>
+    <input id="mInclude" placeholder="e.g. veterans, valor assurance">
+    <div class="small" style="color:var(--dim);margin-bottom:6px">Leave blank for all. If set, only contacts with at least one of these tags are shown.</div>
     <button class="action secondary" id="mScan">Scan for candidates</button>
     <div id="mScanSummary" class="small" style="margin-top:10px"></div>
     <div id="mTableWrap" style="max-height:340px;overflow:auto"></div>
@@ -795,24 +801,36 @@ $("tRun").onclick = async () => {
 
 // ── migration ──
 let mCandidates = [];
+const parseTagList = (s) => (s || "").split(",").map((t) => t.trim()).filter(Boolean);
 $("mScan").onclick = async () => {
   $("mScan").disabled = true;
-  const r = await api("/migrate/scan", { method: "POST", body: { brokerKey: $("mBroker").value } });
+  const r = await api("/migrate/scan", {
+    method: "POST",
+    body: {
+      brokerKey: $("mBroker").value,
+      excludeTags: parseTagList($("mExclude").value),
+      includeTags: parseTagList($("mInclude").value),
+    },
+  });
   $("mScan").disabled = false;
   if (!r.ok) return toast("scan failed: " + r.error);
   mCandidates = r.candidates;
-  $("mScanSummary").innerHTML = `Scanned <b>${r.scanned}</b> contacts — <b>${r.candidates.length}</b> would fail the evidence check${r.truncated ? " (page limit hit — rerun after migrating)" : ""}.`;
+  $("mScanSummary").innerHTML =
+    `Scanned <b>${r.scanned}</b> contacts — <b>${r.candidates.length}</b> would fail the evidence check` +
+    (r.hiddenByTag ? ` (<b>${r.hiddenByTag}</b> hidden by your tag filter)` : "") +
+    (r.truncated ? " (page limit hit — rerun after migrating)" : "") + ".";
   const rows = r.candidates
     .map(
       (c) => `<tr>
         <td><input type="checkbox" class="mSel" value="${esc(c.id)}" checked></td>
         <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
         <td><span class="pill ${c.createdBySource === "INTEGRATION" ? "ok" : "warn"}">${esc(c.createdBySource ?? "—")}</span></td>
+        <td class="small">${esc((c.tags || []).join(", "))}</td>
         <td class="mono">${esc(c.id)}</td></tr>`
     )
     .join("");
   $("mTableWrap").innerHTML = r.candidates.length
-    ? `<table><tr><th></th><th>Name</th><th>Phone</th><th>createdBy.source</th><th>ID</th></tr>${rows}</table>`
+    ? `<table><tr><th></th><th>Name</th><th>Phone</th><th>createdBy.source</th><th>Tags</th><th>ID</th></tr>${rows}</table>`
     : "<p class='small'>Nothing to migrate 🎉</p>";
   $("mActions").style.display = r.candidates.length ? "block" : "none";
 };
