@@ -99,10 +99,24 @@ const ok = (name, cond) => {
   ok("valid signature verifies", verify.verifySignature(rec) === true);
   ok("tampered evidence fails signature", verify.verifySignature({ ...rec, evidence: "first_touch" }) === false);
 
-  // Gate OFF lets a cold contact through (explicit opt-out of safety).
-  const unsafeConfig = { ...config, settings: { ...config.settings, requireMasterEvidence: false } };
-  const coldUnsafe = await bridge.distributeLead({ contactId: "master_cold_1", brokerKey: "broker-a" }, unsafeConfig);
-  ok("gate OFF bridges a cold contact", coldUnsafe.ok === true);
+  // STRICT GATE (mandatory, no bypass): a cold (non-opted-in) contact is REFUSED
+  // and NEVER created in a broker — even if a legacy config tries to disable the
+  // gate via requireMasterEvidence:false (that setting is now ignored).
+  const legacyOffConfig = { ...config, settings: { ...config.settings, requireMasterEvidence: false } };
+  const coldStrict = await bridge.distributeLead({ contactId: "master_cold_1", brokerKey: "broker-a" }, legacyOffConfig);
+  ok("cold contact REFUSED even with legacy requireMasterEvidence:false", coldStrict.ok === false && coldStrict.refused === true);
+  ok("cold contact was NOT created in the broker", coldStrict.brokerContactId == null);
+
+  // Defense in depth: the create primitive itself refuses without a verification
+  // marker, so no caller can ever create a broker contact for an unverified lead.
+  const noMarker = await bridge.recreateInBroker(
+    { id: "x", phone: "+15551239999", createdBy: { source: "INTEGRATION" } },
+    "loc_master", "t",
+    { label: "broker-a", locationId: "loc_broker_a", token: "t" },
+    { duplicatePolicy: "recreate", bridgeTag: "x" },
+    null // no marker
+  );
+  ok("recreateInBroker refuses with no verification marker", noMarker.ok === false && noMarker.refused === true && noMarker.step === "no-verification");
 
   console.log("review fixes:");
   // FIX (critical): international opt-out matches across national/E.164 formats.

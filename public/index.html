@@ -261,11 +261,10 @@
         <input id="cfgVerifiedTag" placeholder="castigliaai-verified">
         <label>Verified note label (white-label)</label>
         <input id="cfgVerifiedNoteLabel" placeholder="CastigliaAI attribution verified via master account">
-        <label>Require master opt-in evidence (safety gate)</label>
-        <select id="cfgRequireEvidence">
-          <option value="true">on — refuse to bridge non-opted-in leads (recommended)</option>
-          <option value="false">off — bridge anything (unsafe)</option>
-        </select>
+        <label>Master opt-in evidence gate</label>
+        <div class="small" style="padding:8px 10px;border:1px solid var(--line,#2a2a2a);border-radius:6px;background:rgba(40,160,90,.12)">
+          🔒 <b>Always on.</b> A lead is created in a broker only when its master record shows genuine opt-in / attribution evidence. This gate is mandatory and cannot be turned off.
+        </div>
         <label>Default country calling code (for opt-out matching)</label>
         <input id="cfgCallingCode" placeholder="1" style="max-width:120px">
         <div class="small" style="color:var(--dim)">Digits only, no +. "1" = US/Canada. Set to your country (e.g. 44 UK, 61 AU) so a national-format opt-out matches an E.164 record.</div>
@@ -501,7 +500,6 @@ async function loadConfig() {
   $("cfgBridgeTag").value = CONFIG.settings.bridgeTag || "";
   $("cfgVerifiedTag").value = CONFIG.settings.verifiedTag || "";
   $("cfgVerifiedNoteLabel").value = CONFIG.settings.verifiedNoteLabel || "";
-  $("cfgRequireEvidence").value = String(CONFIG.settings.requireMasterEvidence !== false);
   $("cfgCallingCode").value = CONFIG.settings.defaultCallingCode || "1";
   $("cfgSecretStatus").textContent = CONFIG.signingSecret === "(set)"
     ? "Signing secret: set ✓ (used to sign verification records)"
@@ -581,7 +579,6 @@ $("cfgSave").onclick = async () => {
         bridgeTag: $("cfgBridgeTag").value.trim(),
         verifiedTag: $("cfgVerifiedTag").value.trim() || undefined,
         verifiedNoteLabel: $("cfgVerifiedNoteLabel").value.trim() || undefined,
-        requireMasterEvidence: $("cfgRequireEvidence").value === "true",
         defaultCallingCode: ($("cfgCallingCode").value.trim() || "1").replace(/\D/g, "") || "1",
         distributionTag: $("cfgDistTag").value.trim(),
         alertWebhookUrl: $("cfgAlertUrl").value.trim(),
