@@ -118,6 +118,41 @@ const ok = (name, cond) => {
   );
   ok("recreateInBroker refuses with no verification marker", noMarker.ok === false && noMarker.refused === true && noMarker.step === "no-verification");
 
+  console.log("tag copy to broker (Anthony):");
+  const masterTags = ["Veterans", "Valor Assurance", "adl", "internal-routing"];
+  // "all" — every master tag carries + app tags (bridge + verified).
+  const tAll = bridge.selectCarryTags(masterTags, { tagCopyMode: "all", bridgeTag: "attribution-bridge", verifiedTag: "castigliaai-verified" }, true);
+  ok("tagCopy all: carries every master tag", ["Veterans", "Valor Assurance", "adl", "internal-routing"].every((t) => tAll.includes(t)));
+  ok("tagCopy all: adds bridge + verified tags", tAll.includes("attribution-bridge") && tAll.includes("castigliaai-verified"));
+  // "list" — only the configured tags carry (case-insensitive), routing tags dropped.
+  const tList = bridge.selectCarryTags(masterTags, { tagCopyMode: "list", tagCopyList: ["veterans", "valor assurance"], bridgeTag: "attribution-bridge", verifiedTag: "castigliaai-verified" }, true);
+  ok("tagCopy list: keeps configured tags (case-insensitive)", tList.includes("Veterans") && tList.includes("Valor Assurance"));
+  ok("tagCopy list: drops non-listed master tags", !tList.includes("adl") && !tList.includes("internal-routing"));
+  // list never fabricates a tag the master doesn't have.
+  const tListMissing = bridge.selectCarryTags(["Veterans"], { tagCopyMode: "list", tagCopyList: ["Veterans", "Valor Assurance"] }, false);
+  ok("tagCopy list: does not add a configured tag absent from the master", !tListMissing.includes("Valor Assurance"));
+  // "none" — no master tags, but app tags still apply.
+  const tNone = bridge.selectCarryTags(masterTags, { tagCopyMode: "none", bridgeTag: "attribution-bridge", verifiedTag: "castigliaai-verified" }, true);
+  ok("tagCopy none: drops all master tags", !tNone.includes("Veterans") && !tNone.includes("adl"));
+  ok("tagCopy none: still keeps app tags", tNone.includes("attribution-bridge") && tNone.includes("castigliaai-verified"));
+  // no marker → no verified tag stamped.
+  const tNoMarker = bridge.selectCarryTags(["Veterans"], { tagCopyMode: "all", bridgeTag: "attribution-bridge", verifiedTag: "castigliaai-verified" }, false);
+  ok("tagCopy: verified tag omitted without a marker", !tNoMarker.includes("castigliaai-verified") && tNoMarker.includes("Veterans"));
+  // case-insensitive de-dupe (master already carries the bridge tag).
+  const tDupe = bridge.selectCarryTags(["Veterans", "Attribution-Bridge"], { tagCopyMode: "all", bridgeTag: "attribution-bridge" }, false);
+  ok("tagCopy: de-dupes tags case-insensitively", tDupe.filter((t) => t.toLowerCase() === "attribution-bridge").length === 1);
+
+  // End-to-end: a bridged broker contact actually receives the selected tags.
+  const tagCfg = {
+    master: { locationId: "loc_master", token: "t", label: "M" },
+    brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } },
+    settings: { duplicatePolicy: "recreate", copyCustomFields: false, bridgeTag: "attribution-bridge", verifiedTag: "castigliaai-verified", tagCopyMode: "list", tagCopyList: ["meta-lead"] },
+  };
+  // master_meta_1 is INTEGRATION-stamped (opted-in) with tags ["meta-lead"].
+  const tagRun = await bridge.distributeLead({ contactId: "master_meta_1", brokerKey: "broker-a" }, tagCfg);
+  const bridgedContact = tagRun.brokerContactId ? await ghl.getContact(tagRun.brokerContactId, "t") : null;
+  ok("end-to-end: bridged broker contact carries the configured master tag", !!bridgedContact && (bridgedContact.tags || []).includes("meta-lead"));
+
   console.log("review fixes:");
   // FIX (critical): international opt-out matches across national/E.164 formats.
   // Default calling code "1" (NANP): withdraw national 10-digit == E.164 +1.

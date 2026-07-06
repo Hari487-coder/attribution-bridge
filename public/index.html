@@ -230,12 +230,10 @@
   </div>
   <div class="card">
     <h2>Per-broker webhook snippets</h2>
-    <p class="hint">Copy a broker's snippet and paste it into their GHL workflow as a Webhook action, in place of Copy Contact (SOP 3.3.2).</p>
+    <p class="hint">Pick a broker, then paste its <b>URL</b> and <b>Body</b> into a GHL <i>HTTP Request</i> action (replacing Copy Contact). The bridge reads the contact's tags from the master account, so the body only needs <code>contact_id</code> + <code>broker_key</code> — no tags in the webhook.</p>
     <label>Broker</label>
     <select id="snipBroker"></select>
-    <pre id="snipOut" class="result" style="margin-top:10px;white-space:pre;overflow-x:auto"></pre>
-    <button class="action secondary" id="snipCopy">Copy snippet</button>
-    <span class="small" id="snipCopied" style="margin-left:8px"></span>
+    <div id="snipOut" style="margin-top:10px"></div>
   </div>
   <div class="card">
     <h2>Pipeline settings</h2>
@@ -255,6 +253,14 @@
         </select>
         <label>Copy custom fields (matched by fieldKey)</label>
         <select id="cfgCopyCf"><option value="true">yes</option><option value="false">no</option></select>
+        <label>Copy master tags to broker (fires the broker's tag-triggered workflows)</label>
+        <select id="cfgTagCopyMode">
+          <option value="all">all — copy every tag on the master contact</option>
+          <option value="list">only these tags — copy just the ones you list (recommended)</option>
+          <option value="none">none — don't copy master tags</option>
+        </select>
+        <input id="cfgTagCopyList" placeholder="Veterans, Valor Assurance" style="margin-top:6px">
+        <div class="small" id="cfgTagCopyHint" style="color:var(--dim)">Comma-separated. Used only when "only these tags" is selected. Case-insensitive; the bridge never adds a tag the master contact doesn't already have.</div>
         <label>Bridge tag added to every created contact</label>
         <input id="cfgBridgeTag">
         <label>Verified tag (white-label)</label>
@@ -422,12 +428,66 @@ function renderBrokerRows() {
 // The webhook snippet for a broker only needs its key + the current webhook
 // key field (even if not saved yet) + this page's own origin — nothing else
 // has to be saved first, so it can render live as the operator types.
-function brokerWebhookSnippet(brokerKey) {
+// Webhook snippet, split into URL + body so each can be pasted straight into
+// GHL's HTTP Request action. The bridge reads the contact's tags from the master
+// itself, so the body only needs contact_id + broker_key — no tags required.
+function brokerWebhookParts(brokerKey) {
   const key = ($("cfgWebhookKey")?.value || "").trim();
   const bk = (brokerKey || "").trim();
-  if (!bk) return "Type a broker key above to generate its webhook snippet.";
-  if (!key) return "Set a webhook key below (Pipeline settings) to generate this snippet.";
-  return `POST ${location.origin}/webhook/lead?key=${key}\n\n{\n  "contact_id": "{{contact.id}}",\n  "broker_key": "${bk}"\n}`;
+  if (!bk) return { hint: "Type a broker key above to generate its webhook." };
+  if (!key) return { hint: "Set a webhook key below (Pipeline settings) to generate this." };
+  return {
+    url: `${location.origin}/webhook/lead?key=${key}`,
+    body: `{\n  "contact_id": "{{contact.id}}",\n  "broker_key": "${bk}"\n}`,
+  };
+}
+
+// Build a two-button snippet block ("Copy URL" + "Copy Body"). Returns { el, set }
+// where set({url, body}) or set({hint}) updates it live.
+function buildSplitSnippet({ compact = false } = {}) {
+  const mk = (el, attrs = {}) => Object.assign(document.createElement(el), attrs);
+  const fs = compact ? "11.5px" : "12.5px";
+  const preStyle =
+    "flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:6px;" +
+    `padding:7px 10px;white-space:pre-wrap;word-break:break-all;margin:0;font-family:var(--mono);font-size:${fs};`;
+  const btnStyle = "margin:0;padding:4px 10px;font-size:11.5px;white-space:nowrap";
+  const rowStyle = "display:flex;gap:8px;align-items:flex-start;margin-bottom:6px";
+
+  const urlRow = mk("div", { style: rowStyle });
+  const urlPre = mk("pre", { className: "small", style: preStyle });
+  const urlBtn = mk("button", { className: "action secondary", textContent: "Copy URL", style: btnStyle });
+  urlRow.append(urlPre, urlBtn);
+
+  const bodyRow = mk("div", { style: rowStyle });
+  const bodyPre = mk("pre", { className: "small", style: preStyle });
+  const bodyBtn = mk("button", { className: "action secondary", textContent: "Copy Body", style: btnStyle });
+  bodyRow.append(bodyPre, bodyBtn);
+
+  const msg = mk("span", { className: "small", style: "margin-left:2px" });
+  const el = mk("div");
+  el.append(urlRow, bodyRow, msg);
+
+  const flash = (t) => { msg.textContent = t; setTimeout(() => (msg.textContent = ""), 2000); };
+  const copy = async (text, label) => {
+    try { await navigator.clipboard.writeText(text); flash(label + " copied ✓"); }
+    catch { flash("select + copy manually"); }
+  };
+  urlBtn.onclick = () => copy(urlPre.textContent, "URL");
+  bodyBtn.onclick = () => copy(bodyPre.textContent, "Body");
+
+  const set = (parts) => {
+    if (!parts || parts.hint) {
+      urlPre.textContent = (parts && parts.hint) || "";
+      bodyRow.style.display = "none";
+      urlBtn.style.display = "none";
+      return;
+    }
+    bodyRow.style.display = "flex";
+    urlBtn.style.display = "";
+    urlPre.textContent = parts.url;
+    bodyPre.textContent = parts.body;
+  };
+  return { el, set };
 }
 
 function addBrokerRow(key = "", loc = "", tok = "") {
@@ -443,32 +503,16 @@ function addBrokerRow(key = "", loc = "", tok = "") {
   });
 
   // Full-width row directly under this broker: its ready-to-paste webhook
-  // snippet, live-updating as the key changes — no save required first.
+  // snippet (Copy URL + Copy Body), live-updating as the key changes.
   const snipWrap = mk("div", { className: "brow bwrow" });
   snipWrap.style.gridColumn = "1 / -1";
   snipWrap.style.margin = "0 0 8px";
-  const snipPre = mk("pre", {
-    className: "small",
-    style:
-      "background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px 10px;" +
-      "white-space:pre-wrap;word-break:break-all;margin:0 0 4px;font-family:var(--mono);font-size:11.5px;",
-  });
-  const copyBtn = mk("button", { className: "action secondary", textContent: "Copy webhook", style: "margin:0;padding:4px 10px;font-size:11.5px" });
-  const copiedMsg = mk("span", { className: "small", style: "margin-left:8px" });
-  copyBtn.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(snipPre.textContent);
-      copiedMsg.textContent = "copied ✓";
-    } catch {
-      copiedMsg.textContent = "select + copy manually";
-    }
-    setTimeout(() => (copiedMsg.textContent = ""), 2000);
-  };
-  snipWrap.append(snipPre, copyBtn, copiedMsg);
+  const snip = buildSplitSnippet({ compact: true });
+  snipWrap.append(snip.el);
   grid.appendChild(snipWrap);
 
   const refresh = () => {
-    snipPre.textContent = brokerWebhookSnippet(kIn.value);
+    snip.set(brokerWebhookParts(kIn.value));
   };
   refresh();
   kIn.addEventListener("input", refresh);
@@ -497,6 +541,9 @@ async function loadConfig() {
   $("cfgAdminPass").value = CONFIG.adminPassword || "";
   $("cfgDupPolicy").value = CONFIG.settings.duplicatePolicy;
   $("cfgCopyCf").value = String(CONFIG.settings.copyCustomFields);
+  $("cfgTagCopyMode").value = CONFIG.settings.tagCopyMode || "all";
+  $("cfgTagCopyList").value = (CONFIG.settings.tagCopyList || []).join(", ");
+  syncTagCopyUi();
   $("cfgBridgeTag").value = CONFIG.settings.bridgeTag || "";
   $("cfgVerifiedTag").value = CONFIG.settings.verifiedTag || "";
   $("cfgVerifiedNoteLabel").value = CONFIG.settings.verifiedNoteLabel || "";
@@ -537,20 +584,22 @@ function renderRouteRows() {
 }
 $("cfgAddRoute").onclick = () => addRouteRow();
 
-// ── webhook snippet menu ──
+// ── webhook snippet menu (Copy URL + Copy Body) ──
+const standaloneSnip = buildSplitSnippet();
+$("snipOut").appendChild(standaloneSnip.el);
 function renderSnippet() {
   const bk = $("snipBroker").value;
-  if (!bk) { $("snipOut").textContent = "Configure a broker first."; return; }
-  const url = location.origin;
-  const key = CONFIG.webhookKey || "YOUR_WEBHOOK_KEY";
-  $("snipOut").textContent =
-    `POST ${url}/webhook/lead?key=${key}\n\n{\n  "contact_id": "{{contact.id}}",\n  "broker_key": "${bk}"\n}`;
+  standaloneSnip.set(bk ? brokerWebhookParts(bk) : { hint: "Configure a broker first." });
 }
 $("snipBroker").onchange = renderSnippet;
-$("snipCopy").onclick = async () => {
-  try { await navigator.clipboard.writeText($("snipOut").textContent); $("snipCopied").textContent = "copied ✓"; setTimeout(() => ($("snipCopied").textContent = ""), 2000); }
-  catch { $("snipCopied").textContent = "select + copy manually"; }
-};
+
+// Show the tag list input only in "only these tags" mode.
+function syncTagCopyUi() {
+  const show = $("cfgTagCopyMode").value === "list";
+  $("cfgTagCopyList").style.display = show ? "" : "none";
+  $("cfgTagCopyHint").style.display = show ? "" : "none";
+}
+$("cfgTagCopyMode").onchange = syncTagCopyUi;
 
 $("cfgAddBroker").onclick = () => addBrokerRow();
 $("cfgWebhookKey").oninput = refreshAllBrokerSnippets;
@@ -576,6 +625,8 @@ $("cfgSave").onclick = async () => {
       settings: {
         duplicatePolicy: $("cfgDupPolicy").value,
         copyCustomFields: $("cfgCopyCf").value === "true",
+        tagCopyMode: $("cfgTagCopyMode").value,
+        tagCopyList: $("cfgTagCopyList").value.split(",").map((t) => t.trim()).filter(Boolean),
         bridgeTag: $("cfgBridgeTag").value.trim(),
         verifiedTag: $("cfgVerifiedTag").value.trim() || undefined,
         verifiedNoteLabel: $("cfgVerifiedNoteLabel").value.trim() || undefined,
