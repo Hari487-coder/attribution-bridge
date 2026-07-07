@@ -171,6 +171,27 @@ const ok = (name, cond) => {
   ok("migrateScan includeTags unmatched → 0 candidates, all baseline hidden",
     scanUnmatched.ok && scanUnmatched.candidates.length === 0 && scanUnmatched.hiddenByTag === scanBase.candidates.length);
 
+  console.log("backlog master-tag filter (Anthony — filter by master's assignment tags):");
+  const mtCfg = { brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, master: { locationId: "loc_master", token: "t" }, settings: {} };
+  // broker_assign_copy: broker tags ["fb lead"]; its MASTER (master_assign_1, same
+  // phone) has ["valor assurance","georgia"].
+  const noM = await bridge.migrateScan("broker-a", mtCfg, {});
+  ok("no master filter → no master lookup performed", noM.masterListed === 0 && noM.hiddenByMasterTag === 0);
+  const mInc = await bridge.migrateScan("broker-a", mtCfg, { masterIncludeTags: ["valor assurance"] });
+  ok("master include keeps a candidate by its MASTER's tag (broker copy lacks it)",
+    mInc.masterListed > 0 && mInc.candidates.some((c) => c.id === "broker_assign_copy"));
+  ok("master include drops candidates whose master lacks the tag",
+    !mInc.candidates.some((c) => c.id === "broker_copy_1") && mInc.hiddenByMasterTag > 0);
+  const bInc = await bridge.migrateScan("broker-a", mtCfg, { includeTags: ["valor assurance"] });
+  ok("contrast: BROKER include hides that same candidate (its own tags lack it)",
+    !bInc.candidates.some((c) => c.id === "broker_assign_copy"));
+  const mExc = await bridge.migrateScan("broker-a", mtCfg, { masterExcludeTags: ["georgia"] });
+  ok("master exclude hides a candidate whose MASTER carries the tag",
+    !mExc.candidates.some((c) => c.id === "broker_assign_copy"));
+  const mBogus = await bridge.migrateScan("broker-a", mtCfg, { masterIncludeTags: ["zzz-no-master-has-this"] });
+  ok("master include unmatched → candidate hidden, master still listed",
+    !mBogus.candidates.some((c) => c.id === "broker_assign_copy") && mBogus.masterListed > 0 && mBogus.masterComplete === true);
+
   console.log("review fixes:");
   // FIX (critical): international opt-out matches across national/E.164 formats.
   // Default calling code "1" (NANP): withdraw national 10-digit == E.164 +1.

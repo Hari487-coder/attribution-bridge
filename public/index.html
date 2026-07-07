@@ -195,6 +195,12 @@
     <label>Only include broker contacts tagged (optional, comma-separated)</label>
     <input id="mInclude" placeholder="e.g. veterans, valor assurance">
     <div class="small" style="color:var(--dim);margin-bottom:6px">Leave blank for all. If set, only contacts with at least one of these tags are shown.</div>
+    <label>Only include by <b>master</b> account tag (optional, comma-separated)</label>
+    <input id="mMasterInclude" placeholder="e.g. valor assurance">
+    <div class="small" style="color:var(--dim);margin-bottom:6px">Filters by the tags on the matching contact in the <b>master</b> account (matched by phone) — the authoritative assignment tags. Blank = all.</div>
+    <label>Exclude by <b>master</b> account tag (optional, comma-separated)</label>
+    <input id="mMasterExclude" placeholder="e.g. do-not-recall">
+    <div class="small" style="color:var(--dim);margin-bottom:6px">Hides candidates whose master contact carries one of these tags.</div>
     <button class="action secondary" id="mScan">Scan for candidates</button>
     <div id="mScanSummary" class="small" style="margin-top:10px"></div>
     <div id="mTableWrap" style="max-height:340px;overflow:auto"></div>
@@ -810,14 +816,20 @@ $("mScan").onclick = async () => {
       brokerKey: $("mBroker").value,
       excludeTags: parseTagList($("mExclude").value),
       includeTags: parseTagList($("mInclude").value),
+      masterIncludeTags: parseTagList($("mMasterInclude").value),
+      masterExcludeTags: parseTagList($("mMasterExclude").value),
     },
   });
   $("mScan").disabled = false;
   if (!r.ok) return toast("scan failed: " + r.error);
   mCandidates = r.candidates;
+  const hid = [];
+  if (r.hiddenByTag) hid.push(`${r.hiddenByTag} by broker tags`);
+  if (r.hiddenByMasterTag) hid.push(`${r.hiddenByMasterTag} by master tags`);
   $("mScanSummary").innerHTML =
     `Scanned <b>${r.scanned}</b> contacts — <b>${r.candidates.length}</b> would fail the evidence check` +
-    (r.hiddenByTag ? ` (<b>${r.hiddenByTag}</b> hidden by your tag filter)` : "") +
+    (hid.length ? ` (<b>${hid.join(", ")}</b> hidden)` : "") +
+    (r.masterComplete === false ? ` <span style="color:var(--warn,#e0a030)">⚠ master had more than ${r.masterListed} contacts — some matches beyond that weren't checked</span>` : "") +
     (r.truncated ? " (page limit hit — rerun after migrating)" : "") + ".";
   const rows = r.candidates
     .map(
