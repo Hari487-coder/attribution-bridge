@@ -273,6 +273,9 @@
         </select>
         <input id="cfgTagCopyList" placeholder="Veterans, Valor Assurance" style="margin-top:6px">
         <div class="small" id="cfgTagCopyHint" style="color:var(--dim)">Comma-separated. Used only when "only these tags" is selected. Case-insensitive; the bridge never adds a tag the master contact doesn't already have.</div>
+        <label>Always add these tags to every bridged contact (comma-separated)</label>
+        <input id="cfgAlwaysAddTags" placeholder="Veterans, Valor Assurance">
+        <div class="small" style="color:var(--dim)">Force-added to every bridged contact regardless of the master — use for campaign/product tags the master doesn't carry. Applied via GHL's add-tags action so the broker's tag-triggered automations fire.</div>
         <label>Bridge tag added to every created contact</label>
         <input id="cfgBridgeTag">
         <label>Verified tag (white-label)</label>
@@ -555,6 +558,7 @@ async function loadConfig() {
   $("cfgCopyCf").value = String(CONFIG.settings.copyCustomFields);
   $("cfgTagCopyMode").value = CONFIG.settings.tagCopyMode || "all";
   $("cfgTagCopyList").value = (CONFIG.settings.tagCopyList || []).join(", ");
+  $("cfgAlwaysAddTags").value = (CONFIG.settings.alwaysAddTags || []).join(", ");
   syncTagCopyUi();
   $("cfgBridgeTag").value = CONFIG.settings.bridgeTag || "";
   $("cfgVerifiedTag").value = CONFIG.settings.verifiedTag || "";
@@ -639,6 +643,7 @@ $("cfgSave").onclick = async () => {
         copyCustomFields: $("cfgCopyCf").value === "true",
         tagCopyMode: $("cfgTagCopyMode").value,
         tagCopyList: $("cfgTagCopyList").value.split(",").map((t) => t.trim()).filter(Boolean),
+        alwaysAddTags: $("cfgAlwaysAddTags").value.split(",").map((t) => t.trim()).filter(Boolean),
         bridgeTag: $("cfgBridgeTag").value.trim(),
         verifiedTag: $("cfgVerifiedTag").value.trim() || undefined,
         verifiedNoteLabel: $("cfgVerifiedNoteLabel").value.trim() || undefined,

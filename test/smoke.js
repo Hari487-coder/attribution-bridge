@@ -153,6 +153,25 @@ const ok = (name, cond) => {
   const bridgedContact = tagRun.brokerContactId ? await ghl.getContact(tagRun.brokerContactId, "t") : null;
   ok("end-to-end: bridged broker contact carries the configured master tag", !!bridgedContact && (bridgedContact.tags || []).includes("meta-lead"));
 
+  console.log("force-add tags (Anthony — tags NOT on the master):");
+  // selectCarryTags force-adds alwaysAddTags regardless of the master's tags.
+  const tForce = bridge.selectCarryTags(["state-x"], { tagCopyMode: "none", alwaysAddTags: ["Veterans", "Valor Assurance"], bridgeTag: "attribution-bridge" }, false);
+  ok("alwaysAddTags force-adds tags absent from the master", tForce.includes("Veterans") && tForce.includes("Valor Assurance"));
+  ok("force-add coexists with tagCopyMode none (no master tags copied)", !tForce.includes("state-x"));
+  // ghl.addTags mock: adds and de-dupes case-insensitively.
+  const seededId = (await ghl.createContact("loc_broker_a", { phone: "+15550808080", firstName: "TagTest" }, "t")).id;
+  await ghl.addTags(seededId, ["alpha", "beta"], "t");
+  await ghl.addTags(seededId, ["Alpha", "gamma"], "t"); // Alpha is a dup of alpha
+  const seededAfter = await ghl.getContact(seededId, "t");
+  ok("ghl.addTags adds tags via the dedicated endpoint + de-dupes", ["alpha", "beta", "gamma"].every((t) => seededAfter.tags.includes(t)) && seededAfter.tags.filter((t) => t.toLowerCase() === "alpha").length === 1);
+  // end-to-end: a bridged contact gets an alwaysAddTag that is NOT on the master.
+  const freshMasterId = (await ghl.createContact("loc_master", { phone: "+15551239000", firstName: "Fresh", tags: ["state-only"] }, "t")).id;
+  const forceCfg = { master: { locationId: "loc_master", token: "t", label: "M" }, brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, settings: { duplicatePolicy: "recreate", copyCustomFields: false, bridgeTag: "attribution-bridge", verifiedTag: "castigliaai-verified", tagCopyMode: "none", alwaysAddTags: ["Veterans"] } };
+  const forceRun = await bridge.distributeLead({ contactId: freshMasterId, brokerKey: "broker-a" }, forceCfg);
+  const forced = forceRun.brokerContactId ? await ghl.getContact(forceRun.brokerContactId, "t") : null;
+  ok("end-to-end: bridged contact gets an alwaysAddTag NOT on the master", !!forced && (forced.tags || []).some((t) => t.toLowerCase() === "veterans"));
+  ok("end-to-end: recreateInBroker reports tagsApplied ok", forceRun.tagsApplied && forceRun.tagsApplied.ok === true);
+
   console.log("backlog tag filter (Anthony — exclude Sold):");
   const F = bridge.contactPassesTagFilter;
   ok("no filter → passes", F(["veterans", "fb lead"], {}) === true);
