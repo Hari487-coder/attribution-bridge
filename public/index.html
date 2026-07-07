@@ -275,7 +275,13 @@
         <div class="small" id="cfgTagCopyHint" style="color:var(--dim)">Comma-separated. Used only when "only these tags" is selected. Case-insensitive; the bridge never adds a tag the master contact doesn't already have.</div>
         <label>Always add these tags to every bridged contact (comma-separated)</label>
         <input id="cfgAlwaysAddTags" placeholder="Veterans, Valor Assurance">
-        <div class="small" style="color:var(--dim)">Force-added to every bridged contact regardless of the master — use for campaign/product tags the master doesn't carry. Applied via GHL's add-tags action so the broker's tag-triggered automations fire.</div>
+        <div class="small" style="color:var(--dim)">Force-added to every bridged contact regardless of the master — use for campaign/product tags the master doesn't carry.</div>
+        <label>When to apply the tags (must match your broker workflow trigger)</label>
+        <select id="cfgTagApplyMode">
+          <option value="create">at creation — for "Contact Created" triggers with a tag filter</option>
+          <option value="after">after creation — for "Contact Tag" / "Tag Added" triggers</option>
+        </select>
+        <div class="small" style="color:var(--dim)">If your broker workflow trigger is <b>Contact Created</b> filtered by tag, use "at creation" so the tag is present when it fires. If it triggers on a <b>tag being added</b>, use "after creation".</div>
         <label>Bridge tag added to every created contact</label>
         <input id="cfgBridgeTag">
         <label>Verified tag (white-label)</label>
@@ -559,6 +565,7 @@ async function loadConfig() {
   $("cfgTagCopyMode").value = CONFIG.settings.tagCopyMode || "all";
   $("cfgTagCopyList").value = (CONFIG.settings.tagCopyList || []).join(", ");
   $("cfgAlwaysAddTags").value = (CONFIG.settings.alwaysAddTags || []).join(", ");
+  $("cfgTagApplyMode").value = CONFIG.settings.tagApplyMode === "after" ? "after" : "create";
   syncTagCopyUi();
   $("cfgBridgeTag").value = CONFIG.settings.bridgeTag || "";
   $("cfgVerifiedTag").value = CONFIG.settings.verifiedTag || "";
@@ -644,6 +651,7 @@ $("cfgSave").onclick = async () => {
         tagCopyMode: $("cfgTagCopyMode").value,
         tagCopyList: $("cfgTagCopyList").value.split(",").map((t) => t.trim()).filter(Boolean),
         alwaysAddTags: $("cfgAlwaysAddTags").value.split(",").map((t) => t.trim()).filter(Boolean),
+        tagApplyMode: $("cfgTagApplyMode").value === "after" ? "after" : "create",
         bridgeTag: $("cfgBridgeTag").value.trim(),
         verifiedTag: $("cfgVerifiedTag").value.trim() || undefined,
         verifiedNoteLabel: $("cfgVerifiedNoteLabel").value.trim() || undefined,

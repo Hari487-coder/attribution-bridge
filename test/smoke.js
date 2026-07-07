@@ -172,6 +172,25 @@ const ok = (name, cond) => {
   ok("end-to-end: bridged contact gets an alwaysAddTag NOT on the master", !!forced && (forced.tags || []).some((t) => t.toLowerCase() === "veterans"));
   ok("end-to-end: recreateInBroker reports tagsApplied ok", forceRun.tagsApplied && forceRun.tagsApplied.ok === true);
 
+  console.log("tag apply mode (Anthony — Contact-Created vs Tag-Added triggers):");
+  const modeBase = { master: { locationId: "loc_master", token: "t" }, brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, settings: { duplicatePolicy: "recreate", copyCustomFields: false, bridgeTag: "attribution-bridge", tagCopyMode: "none", alwaysAddTags: ["Veterans"] } };
+  // "create" mode: tags in the create body → present the instant the contact exists.
+  const cmId = (await ghl.createContact("loc_master", { phone: "+15551239100", firstName: "CreateMode" }, "t")).id;
+  const createRun = await bridge.distributeLead({ contactId: cmId, brokerKey: "broker-a" }, { ...modeBase, settings: { ...modeBase.settings, tagApplyMode: "create" } });
+  const createC = createRun.brokerContactId ? await ghl.getContact(createRun.brokerContactId, "t") : null;
+  ok("create mode: tag present on the contact at creation", !!createC && (createC.tags || []).some((t) => t.toLowerCase() === "veterans"));
+  ok("create mode: tagsApplied.mode === create", createRun.tagsApplied && createRun.tagsApplied.mode === "create");
+  // "after" mode: tags applied via the add-tags event.
+  const amId = (await ghl.createContact("loc_master", { phone: "+15551239200", firstName: "AfterMode" }, "t")).id;
+  const afterRun = await bridge.distributeLead({ contactId: amId, brokerKey: "broker-a" }, { ...modeBase, settings: { ...modeBase.settings, tagApplyMode: "after" } });
+  const afterC = afterRun.brokerContactId ? await ghl.getContact(afterRun.brokerContactId, "t") : null;
+  ok("after mode: tag present on the contact via add-tags", !!afterC && (afterC.tags || []).some((t) => t.toLowerCase() === "veterans"));
+  ok("after mode: tagsApplied.mode === after", afterRun.tagsApplied && afterRun.tagsApplied.mode === "after");
+  // default (unset) mode is "create".
+  const dmId = (await ghl.createContact("loc_master", { phone: "+15551239300", firstName: "DefaultMode" }, "t")).id;
+  const defRun = await bridge.distributeLead({ contactId: dmId, brokerKey: "broker-a" }, modeBase);
+  ok("default apply mode is 'create'", defRun.tagsApplied && defRun.tagsApplied.mode === "create");
+
   console.log("backlog tag filter (Anthony — exclude Sold):");
   const F = bridge.contactPassesTagFilter;
   ok("no filter → passes", F(["veterans", "fb lead"], {}) === true);
