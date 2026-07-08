@@ -230,6 +230,27 @@ const ok = (name, cond) => {
   ok("master include unmatched → candidate hidden, master still listed",
     !mBogus.candidates.some((c) => c.id === "broker_assign_copy") && mBogus.masterListed > 0 && mBogus.masterComplete === true);
 
+  console.log("backlog migration honors duplicate policy (Anthony):");
+  const polCfg = (policy) => ({ brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, master: { locationId: "loc_master", token: "t" }, settings: { duplicatePolicy: policy, bridgeTag: "attribution-bridge", tagApplyMode: "create" } });
+  // Register the three phones so migrateRun has a verified marker (no master needed).
+  for (const p of ["+15550911001", "+15550911002", "+15550911003"]) verify.registerVerification({ phone: p, evidence: "integration_created", masterContactId: "m" });
+  // SKIP → nothing migrated, original untouched.
+  const rSkip = await bridge.migrateRun("broker-a", ["broker_pol_skip"], polCfg("skip"), { dryRun: false });
+  ok("policy skip: leaves the contact (action skip)", rSkip.results[0].action === "skip");
+  ok("policy skip: original still exists", (await ghl.getContact("broker_pol_skip", "t").catch(() => null)) !== null);
+  // STRIP → original KEPT (phone cleared, history preserved) + new attributed contact.
+  const rStrip = await bridge.migrateRun("broker-a", ["broker_pol_strip"], polCfg("strip"), { dryRun: false });
+  ok("policy strip: action stripped-recreated + new contact", rStrip.results[0].action === "stripped-recreated" && !!rStrip.results[0].newId);
+  const oldStrip = await ghl.getContact("broker_pol_strip", "t").catch(() => null);
+  ok("policy strip: original KEPT with phone cleared (history preserved)", oldStrip !== null && !oldStrip.phone);
+  // RECREATE → original DELETED, new created.
+  const rRecreate = await bridge.migrateRun("broker-a", ["broker_pol_recreate"], polCfg("recreate"), { dryRun: false });
+  ok("policy recreate: action recreated + new contact", rRecreate.results[0].action === "recreated" && !!rRecreate.results[0].newId);
+  ok("policy recreate: original DELETED", (await ghl.getContact("broker_pol_recreate", "t").catch(() => null)) === null);
+  // Dry-run reflects the policy without mutating.
+  const rDry = await bridge.migrateRun("broker-a", ["broker_pol_skip"], polCfg("strip"), { dryRun: true });
+  ok("policy dry-run reports would-strip-recreate", rDry.results[0].action === "would-strip-recreate" && rDry.results[0].policy === "strip");
+
   console.log("review fixes:");
   // FIX (critical): international opt-out matches across national/E.164 formats.
   // Default calling code "1" (NANP): withdraw national 10-digit == E.164 +1.

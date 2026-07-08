@@ -186,7 +186,7 @@
 <section id="tab-migrate">
   <div class="card">
     <h2>Backlog migration</h2>
-    <p class="hint">Existing copies made with GHL "Copy Contact" keep their old stamp forever (createdBy is immutable). This scans a broker location for contacts that would fail the evidence check, then deletes + recreates them through the API channel. <b>Dry-run first, always.</b></p>
+    <p class="hint">Existing copies made with GHL "Copy Contact" keep their old stamp forever (createdBy is immutable). This scans a broker location for contacts that would fail the evidence check, then re-creates them through the API channel — following your <b>duplicate policy</b> (skip / strip / recreate) from Setup. <b>Dry-run first, always.</b></p>
     <label>Broker</label>
     <select id="mBroker"></select>
     <label>Exclude broker contacts tagged (optional, comma-separated)</label>
@@ -205,8 +205,9 @@
     <div id="mScanSummary" class="small" style="margin-top:10px"></div>
     <div id="mTableWrap" style="max-height:340px;overflow:auto"></div>
     <div id="mActions" style="display:none">
+      <div class="small" id="mPolicyNote" style="margin-bottom:6px"></div>
       <button class="action" id="mDry">Dry-run selected</button>
-      <button class="action danger" id="mLive">Recreate selected (deletes originals)</button>
+      <button class="action danger" id="mLive">Migrate selected</button>
     </div>
     <pre id="mResult" class="result" style="display:none"></pre>
   </div>
@@ -858,12 +859,37 @@ $("mScan").onclick = async () => {
     ? `<table><tr><th></th><th>Name</th><th>Phone</th><th>createdBy.source</th><th>Tags</th><th>ID</th></tr>${rows}</table>`
     : "<p class='small'>Nothing to migrate 🎉</p>";
   $("mActions").style.display = r.candidates.length ? "block" : "none";
+  updateMigratePolicyNote();
 };
 
+function migratePolicy() {
+  return (CONFIG.settings && CONFIG.settings.duplicatePolicy) || "recreate";
+}
+// Show the active policy (and what it does) right above the Migrate button.
+function updateMigratePolicyNote() {
+  const p = migratePolicy();
+  const txt =
+    p === "skip"
+      ? '⚠ Duplicate policy is <b>skip</b> — Migrate will NOT change any contacts. Set "strip" or "recreate" in Setup → Pipeline settings.'
+      : p === "strip"
+        ? 'Duplicate policy is <b>strip</b> — originals are kept (phone/email cleared, <b>conversation history preserved</b>) and a new attributed contact is created for each.'
+        : 'Duplicate policy is <b>recreate</b> — originals are <b>deleted</b> (conversation history lost) and re-created with attribution.';
+  const el = $("mPolicyNote");
+  if (el) el.innerHTML = `${txt} <span style="color:var(--dim)">(change it in Setup → Pipeline settings)</span>`;
+}
 async function runMigrate(dryRun) {
   const ids = [...document.querySelectorAll(".mSel:checked")].map((c) => c.value);
   if (!ids.length) return toast("nothing selected");
-  if (!dryRun && !confirm(`Delete + recreate ${ids.length} contact(s)? Their GHL conversation history in this location is lost.`)) return;
+  const p = migratePolicy();
+  if (!dryRun) {
+    const msg =
+      p === "skip"
+        ? `Your duplicate policy is "skip", so nothing will be migrated (contacts are left untouched). Change it to "strip" or "recreate" in Setup → Pipeline settings. Run anyway?`
+        : p === "strip"
+          ? `Migrate ${ids.length} contact(s) using "strip" policy?\n\nThe originals are KEPT (phone/email cleared, so conversation history is preserved) and a new attributed contact is created for each.`
+          : `Migrate ${ids.length} contact(s) using "recreate" policy?\n\nThe originals are DELETED — their GHL conversation history in this location is lost.`;
+    if (!confirm(msg)) return;
+  }
   const r = await api("/migrate/run", {
     method: "POST",
     body: { brokerKey: $("mBroker").value, contactIds: ids, dryRun },
