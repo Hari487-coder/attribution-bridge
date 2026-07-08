@@ -202,6 +202,12 @@ const ok = (name, cond) => {
   ok("exclude wins over include", F(["veterans", "sold"], { includeTags: ["veterans"], excludeTags: ["sold"] }) === false);
   ok("empty tags + include list → dropped", F([], { includeTags: ["veterans"] }) === false);
   ok("empty tags + no filter → passes", F([], {}) === true);
+  // includeMode: ANY (OR, default) vs ALL (AND).
+  ok("include ANY (default): one of two listed tags matches", F(["veterans"], { includeTags: ["veterans", "valor assurance"] }) === true);
+  ok("include ALL: one of two present → dropped", F(["veterans"], { includeTags: ["veterans", "valor assurance"], includeMode: "all" }) === false);
+  ok("include ALL: every listed tag present → passes", F(["veterans", "valor assurance", "extra"], { includeTags: ["veterans", "valor assurance"], includeMode: "all" }) === true);
+  ok("include ALL is case-insensitive", F(["Veterans", "VALOR ASSURANCE"], { includeTags: ["veterans", "valor assurance"], includeMode: "all" }) === true);
+  ok("include ALL still respects exclude", F(["veterans", "valor assurance", "sold"], { includeTags: ["veterans", "valor assurance"], includeMode: "all", excludeTags: ["sold"] }) === false);
   // Integration: migrateScan applies the filter and reports hiddenByTag.
   const scanCfgF = { brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, master: { locationId: "loc_master", token: "t" }, settings: {} };
   const scanBase = await bridge.migrateScan("broker-a", scanCfgF, {});
@@ -229,6 +235,11 @@ const ok = (name, cond) => {
   const mBogus = await bridge.migrateScan("broker-a", mtCfg, { masterIncludeTags: ["zzz-no-master-has-this"] });
   ok("master include unmatched → candidate hidden, master still listed",
     !mBogus.candidates.some((c) => c.id === "broker_assign_copy") && mBogus.masterListed > 0 && mBogus.masterComplete === true);
+  // master include ALL (AND): master_assign_1 has ["valor assurance","georgia"].
+  const mAll = await bridge.migrateScan("broker-a", mtCfg, { masterIncludeTags: ["valor assurance", "georgia"], masterIncludeMode: "all" });
+  ok("master include ALL: kept when the master has BOTH tags", mAll.candidates.some((c) => c.id === "broker_assign_copy"));
+  const mAllMiss = await bridge.migrateScan("broker-a", mtCfg, { masterIncludeTags: ["valor assurance", "not-on-master"], masterIncludeMode: "all" });
+  ok("master include ALL: dropped when the master lacks one of the tags", !mAllMiss.candidates.some((c) => c.id === "broker_assign_copy"));
 
   console.log("backlog migration honors duplicate policy (Anthony):");
   const polCfg = (policy) => ({ brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, master: { locationId: "loc_master", token: "t" }, settings: { duplicatePolicy: policy, bridgeTag: "attribution-bridge", tagApplyMode: "create" } });

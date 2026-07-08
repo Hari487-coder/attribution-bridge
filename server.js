@@ -430,8 +430,10 @@ api.post("/migrate/scan", async (req, res) => {
       maxPages: Number(b.maxPages) || 10,
       includeTags: Array.isArray(b.includeTags) ? b.includeTags : [],
       excludeTags: Array.isArray(b.excludeTags) ? b.excludeTags : [],
+      includeMode: b.includeMode === "all" ? "all" : "any",
       masterIncludeTags: Array.isArray(b.masterIncludeTags) ? b.masterIncludeTags : [],
       masterExcludeTags: Array.isArray(b.masterExcludeTags) ? b.masterExcludeTags : [],
+      masterIncludeMode: b.masterIncludeMode === "all" ? "all" : "any",
     });
     res.status(result.ok ? 200 : 422).json(result);
   } catch (err) {

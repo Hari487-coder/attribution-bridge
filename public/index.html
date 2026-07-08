@@ -194,10 +194,18 @@
     <div class="small" style="color:var(--dim);margin-bottom:6px">Contacts already carrying one of these tags in the broker are hidden — so a sold/closed lead won't show as re-writable.</div>
     <label>Only include broker contacts tagged (optional, comma-separated)</label>
     <input id="mInclude" placeholder="e.g. veterans, valor assurance">
-    <div class="small" style="color:var(--dim);margin-bottom:6px">Leave blank for all. If set, only contacts with at least one of these tags are shown.</div>
+    <select id="mIncludeMode" style="max-width:280px;margin-top:4px">
+      <option value="any">match ANY of these tags (OR)</option>
+      <option value="all">match ALL of these tags (AND)</option>
+    </select>
+    <div class="small" style="color:var(--dim);margin-bottom:6px">Leave blank for all. <b>ANY</b> keeps a contact with at least one of the tags; <b>ALL</b> requires every listed tag to be present.</div>
     <label>Only include by <b>master</b> account tag (optional, comma-separated)</label>
     <input id="mMasterInclude" placeholder="e.g. valor assurance">
-    <div class="small" style="color:var(--dim);margin-bottom:6px">Filters by the tags on the matching contact in the <b>master</b> account (matched by phone) — the authoritative assignment tags. Blank = all.</div>
+    <select id="mMasterIncludeMode" style="max-width:280px;margin-top:4px">
+      <option value="any">match ANY of these tags (OR)</option>
+      <option value="all">match ALL of these tags (AND)</option>
+    </select>
+    <div class="small" style="color:var(--dim);margin-bottom:6px">Filters by the matching <b>master</b> contact's tags (matched by phone) — the authoritative assignment tags. <b>ANY</b> = at least one; <b>ALL</b> = every listed tag. Blank = all.</div>
     <label>Exclude by <b>master</b> account tag (optional, comma-separated)</label>
     <input id="mMasterExclude" placeholder="e.g. do-not-recall">
     <div class="small" style="color:var(--dim);margin-bottom:6px">Hides candidates whose master contact carries one of these tags.</div>
@@ -830,8 +838,10 @@ $("mScan").onclick = async () => {
       brokerKey: $("mBroker").value,
       excludeTags: parseTagList($("mExclude").value),
       includeTags: parseTagList($("mInclude").value),
+      includeMode: $("mIncludeMode").value,
       masterIncludeTags: parseTagList($("mMasterInclude").value),
       masterExcludeTags: parseTagList($("mMasterExclude").value),
+      masterIncludeMode: $("mMasterIncludeMode").value,
     },
   });
   $("mScan").disabled = false;
