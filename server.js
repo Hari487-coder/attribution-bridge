@@ -487,6 +487,67 @@ api.post("/master/push", async (req, res) => {
   }
 });
 
+// ── One-time (ad-hoc) transfer between arbitrary source→destination accounts ──
+// Credentials are provided inline and are NEVER saved to config. Same guarantees:
+// the mandatory opt-in gate, opt-out registry, and INTEGRATION stamp all apply.
+// Reuses masterScan/masterPush with a transient in-memory config.
+function adhocConfig({ srcLoc, srcTok, dstLoc, dstTok, duplicatePolicy } = {}) {
+  const base = store.loadConfig().settings;
+  return {
+    master: { locationId: srcLoc, token: srcTok, label: "source" },
+    brokers: dstLoc ? { adhoc: { locationId: dstLoc, token: dstTok, label: "destination" } } : {},
+    settings: {
+      ...base,
+      // Neutral for an arbitrary account: copy all source tags, no campaign
+      // force-adds; the operator picks the duplicate policy per transfer.
+      tagCopyMode: "all",
+      alwaysAddTags: [],
+      duplicatePolicy: ["skip", "strip", "recreate"].includes(duplicatePolicy) ? duplicatePolicy : "skip",
+    },
+  };
+}
+
+api.post("/adhoc/scan", async (req, res) => {
+  try {
+    const b = req.body ?? {};
+    if (!b.sourceLocationId || !b.sourceToken) {
+      return res.status(400).json({ ok: false, error: "Source location ID and API token are required." });
+    }
+    const cfg = adhocConfig({ srcLoc: b.sourceLocationId, srcTok: b.sourceToken });
+    const result = await bridge.masterScan(cfg, {
+      startAfterId: b.startAfterId,
+      startAfter: b.startAfter,
+      pages: Number(b.pages) || 3,
+    });
+    res.status(result.ok ? 200 : 422).json(result);
+  } catch (err) {
+    res.status(200).json({ ok: false, error: err.message });
+  }
+});
+
+api.post("/adhoc/push", async (req, res) => {
+  const b = req.body ?? {};
+  if (!b.sourceLocationId || !b.sourceToken || !b.destLocationId || !b.destToken) {
+    return res.status(400).json({ ok: false, error: "Source and destination location IDs and tokens are all required." });
+  }
+  if (!Array.isArray(b.contactIds) || b.contactIds.length === 0) {
+    return res.status(400).json({ ok: false, error: "Select at least one contact." });
+  }
+  try {
+    const cfg = adhocConfig({
+      srcLoc: b.sourceLocationId,
+      srcTok: b.sourceToken,
+      dstLoc: b.destLocationId,
+      dstTok: b.destToken,
+      duplicatePolicy: b.duplicatePolicy,
+    });
+    const result = await bridge.masterPush("adhoc", b.contactIds, cfg, { dryRun: b.dryRun !== false });
+    res.status(result.ok ? 200 : 422).json(result);
+  } catch (err) {
+    res.status(200).json({ ok: false, error: err.message });
+  }
+});
+
 app.use("/api", api);
 
 // ── UI ───────────────────────────────────────────────────────────────────────

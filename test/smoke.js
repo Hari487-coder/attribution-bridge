@@ -262,6 +262,17 @@ const ok = (name, cond) => {
   const rDry = await bridge.migrateRun("broker-a", ["broker_pol_skip"], polCfg("strip"), { dryRun: true });
   ok("policy dry-run reports would-strip-recreate", rDry.results[0].action === "would-strip-recreate" && rDry.results[0].policy === "strip");
 
+  console.log("one-time (ad-hoc) transfer:");
+  // A transient config (source=loc_master, dest=loc_broker_a) drives the same
+  // masterScan/masterPush the /api/adhoc/* endpoints use — no saved credentials.
+  const adhocSrcId = (await ghl.createContact("loc_master", { phone: "+15551240500", firstName: "AdhocSrc", tags: ["src-tag"] }, "t")).id;
+  const adhocCfg = { master: { locationId: "loc_master", token: "t", label: "source" }, brokers: { adhoc: { locationId: "loc_broker_a", token: "t", label: "destination" } }, settings: { duplicatePolicy: "skip", tagCopyMode: "all", tagApplyMode: "create" } };
+  const adScan = await bridge.masterScan(adhocCfg, { pages: 1 });
+  ok("adhoc scan lists the opted-in source contact", adScan.ok && adScan.contacts.some((c) => c.id === adhocSrcId && c.verified === true));
+  const adPush = await bridge.masterPush("adhoc", [adhocSrcId], adhocCfg, { dryRun: false });
+  ok("adhoc transfer bridges the contact to the destination", adPush.ok && adPush.results[0].action === "bridged");
+  ok("adhoc transfer still refuses a non-opted-in source contact", (await bridge.masterPush("adhoc", ["master_cold_1"], adhocCfg, { dryRun: false })).results[0].action === "refused");
+
   console.log("review fixes:");
   // FIX (critical): international opt-out matches across national/E.164 formats.
   // Default calling code "1" (NANP): withdraw national 10-digit == E.164 +1.

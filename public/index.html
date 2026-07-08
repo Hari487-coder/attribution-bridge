@@ -68,6 +68,7 @@
   <button data-tab="bulk">Bulk import</button>
   <button data-tab="registry">Verified registry</button>
   <button data-tab="migrate">Backlog migration</button>
+  <button data-tab="adhoc">One-time transfer</button>
   <button data-tab="setup">Setup</button>
   <button data-tab="activity">Activity</button>
   <button data-tab="playbook">Playbook</button>
@@ -218,6 +219,49 @@
       <button class="action danger" id="mLive">Migrate selected</button>
     </div>
     <pre id="mResult" class="result" style="display:none"></pre>
+  </div>
+</section>
+
+<!-- ── One-time transfer ── -->
+<section id="tab-adhoc">
+  <div class="card">
+    <h2>One-time transfer</h2>
+    <p class="hint">Transfer opted-in contacts between <b>any</b> two GHL accounts without saving them — for a one-off migration into another master/destination pair. Paste the credentials below; they're used only for this transfer and are <b>never stored</b>. The same rules apply: only genuinely opted-in contacts move, opt-outs are refused, and each is created through the API so it keeps the INTEGRATION stamp.</p>
+    <div class="row">
+      <div>
+        <label>Source (from) location ID</label>
+        <input id="ahSrcLoc" placeholder="source GHL location id">
+        <label>Source API token</label>
+        <input id="ahSrcTok" type="password" placeholder="source API token (not saved)">
+      </div>
+      <div>
+        <label>Destination (to) location ID</label>
+        <input id="ahDstLoc" placeholder="destination GHL location id">
+        <label>Destination API token</label>
+        <input id="ahDstTok" type="password" placeholder="destination API token (not saved)">
+      </div>
+    </div>
+    <label>If the destination already has the phone</label>
+    <select id="ahDupPolicy" style="max-width:340px">
+      <option value="skip">skip — leave the existing contact</option>
+      <option value="strip">strip — keep the old (clear phone/email), create fresh</option>
+      <option value="recreate">recreate — delete the old, create fresh</option>
+    </select>
+    <button class="action secondary" id="ahScan">Scan source for opted-in contacts</button>
+    <div id="ahSummary" class="small" style="margin-top:10px"></div>
+    <div id="ahControls" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0">
+      <input id="ahSearch" placeholder="Search name or phone…" style="max-width:220px;margin:0">
+      <label style="display:inline-block;margin:0"><input type="checkbox" id="ahOnlyEligible" checked> only eligible (opted-in)</label>
+      <button class="action secondary" id="ahSelectAll" style="margin:0">Select all shown</button>
+      <button class="action secondary" id="ahSelectNone" style="margin:0">Deselect all</button>
+      <span class="small" id="ahSelCount"></span>
+    </div>
+    <div id="ahTableWrap" style="max-height:360px;overflow:auto"></div>
+    <div id="ahActions" style="display:none;margin-top:8px">
+      <button class="action" id="ahDry">Dry-run selected</button>
+      <button class="action" id="ahPush">Transfer selected</button>
+    </div>
+    <pre id="ahResult" class="result" style="display:none"></pre>
   </div>
 </section>
 
@@ -1035,6 +1079,109 @@ async function runBulk(dryRun) {
 }
 $("bkDry").onclick = () => runBulk(true);
 $("bkPush").onclick = () => runBulk(false);
+
+// ── one-time (ad-hoc) transfer ──
+let ahAll = [];
+function ahRowHtml(c) {
+  const elig = c.verified === true;
+  const pill = elig ? '<span class="pill ok">opted-in</span>' : c.verified === null ? '<span class="pill">unchecked</span>' : '<span class="pill bad">no</span>';
+  return `<tr data-eligible="${elig}">
+    <td><input type="checkbox" class="ahSel" value="${esc(c.id)}" ${elig ? "checked" : ""}></td>
+    <td>${esc(c.name)}</td><td class="mono">${esc(c.phone || "")}</td>
+    <td>${pill}${c.reason ? ` <span class="small" style="color:var(--dim)">${esc(c.reason)}</span>` : ""}</td>
+    <td class="small">${esc((c.tags || []).join(", "))}</td>
+    <td class="mono">${esc(c.id)}</td></tr>`;
+}
+function ahSummaryHtml(done) {
+  const elig = ahAll.filter((c) => c.verified === true).length;
+  const unk = ahAll.filter((c) => c.verified === null).length;
+  const noe = ahAll.length - elig - unk;
+  return `${done ? "Scanned" : "Scanning…"} <b>${ahAll.length}</b> source contacts — <b>${elig}</b> opted-in, ${noe} not eligible${unk ? `, ${unk} unchecked` : ""}${done ? "." : " so far…"}`;
+}
+function ahApplyFilter() {
+  const only = $("ahOnlyEligible").checked;
+  const q = ($("ahSearch").value || "").trim().toLowerCase();
+  $("ahControls").style.display = document.querySelector("#ahTableWrap tr[data-eligible]") ? "flex" : "none";
+  document.querySelectorAll("#ahTableWrap tr[data-eligible]").forEach((tr) => {
+    const elig = tr.dataset.eligible === "true";
+    const hidden = (only && !elig) || (q && !tr.textContent.toLowerCase().includes(q));
+    tr.style.display = hidden ? "none" : "";
+  });
+  ahUpdateCount();
+}
+function ahSelectedIds() {
+  return [...document.querySelectorAll("#ahTableWrap tr[data-eligible]")]
+    .filter((tr) => tr.style.display !== "none" && tr.querySelector(".ahSel").checked)
+    .map((tr) => tr.querySelector(".ahSel").value);
+}
+function ahUpdateCount() {
+  const n = ahSelectedIds().length;
+  $("ahSelCount").textContent = n ? `${n} selected` : "";
+}
+$("ahScan").onclick = async () => {
+  const sourceLocationId = $("ahSrcLoc").value.trim();
+  const sourceToken = $("ahSrcTok").value.trim();
+  if (!sourceLocationId || !sourceToken) return toast("Enter the source location ID and token first.");
+  $("ahScan").disabled = true;
+  const orig = $("ahScan").textContent;
+  $("ahScan").textContent = "Scanning…";
+  ahAll = [];
+  $("ahTableWrap").innerHTML = `<table id="ahTable"><tr><th></th><th>Name</th><th>Phone</th><th>Opt-in</th><th>Tags</th><th>ID</th></tr></table>`;
+  $("ahActions").style.display = "block";
+  let cursor = null, batches = 0;
+  try {
+    do {
+      const body = { sourceLocationId, sourceToken, ...(cursor ? { startAfterId: cursor.startAfterId, startAfter: cursor.startAfter } : {}) };
+      const r = await api("/adhoc/scan", { method: "POST", body });
+      if (!r.ok) { toast("scan failed: " + (r.error || "unknown")); break; }
+      ahAll.push(...r.contacts);
+      const tbl = document.getElementById("ahTable");
+      if (tbl) tbl.insertAdjacentHTML("beforeend", r.contacts.map(ahRowHtml).join(""));
+      $("ahSummary").innerHTML = ahSummaryHtml(!r.nextCursor);
+      ahApplyFilter();
+      cursor = r.nextCursor;
+      batches++;
+    } while (cursor && batches < 60);
+  } finally {
+    $("ahScan").disabled = false;
+    $("ahScan").textContent = orig;
+  }
+  if (!ahAll.length) {
+    $("ahTableWrap").innerHTML = "<p class='small'>No contacts with phone numbers found in the source account.</p>";
+    $("ahActions").style.display = "none";
+  }
+};
+$("ahSearch").oninput = ahApplyFilter;
+$("ahOnlyEligible").onchange = ahApplyFilter;
+$("ahSelectAll").onclick = () => { document.querySelectorAll("#ahTableWrap tr[data-eligible]").forEach((tr) => { if (tr.style.display !== "none") tr.querySelector(".ahSel").checked = true; }); ahUpdateCount(); };
+$("ahSelectNone").onclick = () => { document.querySelectorAll("#ahTableWrap .ahSel").forEach((c) => (c.checked = false)); ahUpdateCount(); };
+document.getElementById("ahTableWrap").addEventListener("change", (e) => { if (e.target.classList.contains("ahSel")) ahUpdateCount(); });
+async function runAdhoc(dryRun) {
+  const ids = ahSelectedIds();
+  if (!ids.length) return toast("nothing selected");
+  const body = {
+    sourceLocationId: $("ahSrcLoc").value.trim(),
+    sourceToken: $("ahSrcTok").value.trim(),
+    destLocationId: $("ahDstLoc").value.trim(),
+    destToken: $("ahDstTok").value.trim(),
+    duplicatePolicy: $("ahDupPolicy").value,
+    contactIds: ids,
+    dryRun,
+  };
+  if (!body.destLocationId || !body.destToken) return toast("Enter the destination location ID and token first.");
+  if (!dryRun && !confirm(`Transfer ${ids.length} contact(s) to the destination account? Non-opted-in and opted-out contacts are refused automatically.`)) return;
+  $("ahDry").disabled = $("ahPush").disabled = true;
+  const r = await api("/adhoc/push", { method: "POST", body });
+  $("ahDry").disabled = $("ahPush").disabled = false;
+  $("ahResult").style.display = "block";
+  $("ahResult").textContent = JSON.stringify(r, null, 2);
+  if (r.ok && !dryRun) {
+    const bridged = (r.results || []).filter((x) => x.action === "bridged").length;
+    toast(`Transferred: ${bridged} of ${(r.results || []).length}`);
+  }
+}
+$("ahDry").onclick = () => runAdhoc(true);
+$("ahPush").onclick = () => runAdhoc(false);
 
 // ── activity ──
 async function loadLog() {
