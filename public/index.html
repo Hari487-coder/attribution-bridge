@@ -872,7 +872,7 @@ function updateMigratePolicyNote() {
     p === "skip"
       ? '⚠ Duplicate policy is <b>skip</b> — Migrate will NOT change any contacts. Set "strip" or "recreate" in Setup → Pipeline settings.'
       : p === "strip"
-        ? 'Duplicate policy is <b>strip</b> — originals are kept (phone/email cleared, <b>conversation history preserved</b>) and a new attributed contact is created for each.'
+        ? 'Duplicate policy is <b>strip</b> — each original is kept but its phone/email is cleared first (so the new contact won\'t hit GHL\'s no-duplicate block), <b>preserving its conversation history</b>. A new attributed contact is then created with that number.'
         : 'Duplicate policy is <b>recreate</b> — originals are <b>deleted</b> (conversation history lost) and re-created with attribution.';
   const el = $("mPolicyNote");
   if (el) el.innerHTML = `${txt} <span style="color:var(--dim)">(change it in Setup → Pipeline settings)</span>`;
@@ -886,7 +886,7 @@ async function runMigrate(dryRun) {
       p === "skip"
         ? `Your duplicate policy is "skip", so nothing will be migrated (contacts are left untouched). Change it to "strip" or "recreate" in Setup → Pipeline settings. Run anyway?`
         : p === "strip"
-          ? `Migrate ${ids.length} contact(s) using "strip" policy?\n\nThe originals are KEPT (phone/email cleared, so conversation history is preserved) and a new attributed contact is created for each.`
+          ? `Migrate ${ids.length} contact(s) using "strip" policy?\n\nEach original is KEPT — its phone/email is cleared first (so the new contact won't hit GHL's no-duplicate block) and its conversation history is preserved. A new attributed contact is then created with that number for the AI to call.`
           : `Migrate ${ids.length} contact(s) using "recreate" policy?\n\nThe originals are DELETED — their GHL conversation history in this location is lost.`;
     if (!confirm(msg)) return;
   }
