@@ -220,10 +220,11 @@ const ok = (name, cond) => {
   // broker_assign_copy: broker tags ["fb lead"]; its MASTER (master_assign_1, same
   // phone) has ["valor assurance","georgia"].
   const noM = await bridge.migrateScan("broker-a", mtCfg, {});
-  ok("no master filter → no master lookup performed", noM.masterListed === 0 && noM.hiddenByMasterTag === 0);
+  ok("no master filter → no master lookup performed", noM.hiddenByMasterTag === 0);
+  ok("scan returns a nextCursor field (null when the account fits one batch)", noM.nextCursor === null);
   const mInc = await bridge.migrateScan("broker-a", mtCfg, { masterIncludeTags: ["valor assurance"] });
   ok("master include keeps a candidate by its MASTER's tag (broker copy lacks it)",
-    mInc.masterListed > 0 && mInc.candidates.some((c) => c.id === "broker_assign_copy"));
+    mInc.candidates.some((c) => c.id === "broker_assign_copy"));
   ok("master include drops candidates whose master lacks the tag",
     !mInc.candidates.some((c) => c.id === "broker_copy_1") && mInc.hiddenByMasterTag > 0);
   const bInc = await bridge.migrateScan("broker-a", mtCfg, { includeTags: ["valor assurance"] });
@@ -233,8 +234,8 @@ const ok = (name, cond) => {
   ok("master exclude hides a candidate whose MASTER carries the tag",
     !mExc.candidates.some((c) => c.id === "broker_assign_copy"));
   const mBogus = await bridge.migrateScan("broker-a", mtCfg, { masterIncludeTags: ["zzz-no-master-has-this"] });
-  ok("master include unmatched → candidate hidden, master still listed",
-    !mBogus.candidates.some((c) => c.id === "broker_assign_copy") && mBogus.masterListed > 0 && mBogus.masterComplete === true);
+  ok("master include unmatched → candidate hidden (per-candidate lookup)",
+    !mBogus.candidates.some((c) => c.id === "broker_assign_copy") && mBogus.hiddenByMasterTag > 0);
   // master include ALL (AND): master_assign_1 has ["valor assurance","georgia"].
   const mAll = await bridge.migrateScan("broker-a", mtCfg, { masterIncludeTags: ["valor assurance", "georgia"], masterIncludeMode: "all" });
   ok("master include ALL: kept when the master has BOTH tags", mAll.candidates.some((c) => c.id === "broker_assign_copy"));

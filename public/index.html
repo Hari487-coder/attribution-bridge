@@ -874,45 +874,64 @@ $("tRun").onclick = async () => {
 // ── migration ──
 let mCandidates = [];
 const parseTagList = (s) => (s || "").split(",").map((t) => t.trim()).filter(Boolean);
+function mRowHtml(c) {
+  return `<tr>
+    <td><input type="checkbox" class="mSel" value="${esc(c.id)}" checked></td>
+    <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
+    <td><span class="pill ${c.createdBySource === "INTEGRATION" ? "ok" : "warn"}">${esc(c.createdBySource ?? "—")}</span></td>
+    <td class="small">${esc((c.tags || []).join(", "))}</td>
+    <td class="mono">${esc(c.id)}</td></tr>`;
+}
+// The scan loops through the WHOLE broker account in bounded cursor batches
+// (like Bulk Import), so a scattered set of candidates is found in one click —
+// no 1000-per-run cap and no re-running.
 $("mScan").onclick = async () => {
   $("mScan").disabled = true;
-  const r = await api("/migrate/scan", {
-    method: "POST",
-    body: {
-      brokerKey: $("mBroker").value,
-      excludeTags: parseTagList($("mExclude").value),
-      includeTags: parseTagList($("mInclude").value),
-      includeMode: $("mIncludeMode").value,
-      masterIncludeTags: parseTagList($("mMasterInclude").value),
-      masterExcludeTags: parseTagList($("mMasterExclude").value),
-      masterIncludeMode: $("mMasterIncludeMode").value,
-    },
-  });
-  $("mScan").disabled = false;
-  if (!r.ok) return toast("scan failed: " + r.error);
-  mCandidates = r.candidates;
-  const hid = [];
-  if (r.hiddenByTag) hid.push(`${r.hiddenByTag} by broker tags`);
-  if (r.hiddenByMasterTag) hid.push(`${r.hiddenByMasterTag} by master tags`);
-  $("mScanSummary").innerHTML =
-    `Scanned <b>${r.scanned}</b> contacts — <b>${r.candidates.length}</b> would fail the evidence check` +
-    (hid.length ? ` (<b>${hid.join(", ")}</b> hidden)` : "") +
-    (r.masterComplete === false ? ` <span style="color:var(--warn,#e0a030)">⚠ master had more than ${r.masterListed} contacts — some matches beyond that weren't checked</span>` : "") +
-    (r.truncated ? " (page limit hit — rerun after migrating)" : "") + ".";
-  const rows = r.candidates
-    .map(
-      (c) => `<tr>
-        <td><input type="checkbox" class="mSel" value="${esc(c.id)}" checked></td>
-        <td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td>
-        <td><span class="pill ${c.createdBySource === "INTEGRATION" ? "ok" : "warn"}">${esc(c.createdBySource ?? "—")}</span></td>
-        <td class="small">${esc((c.tags || []).join(", "))}</td>
-        <td class="mono">${esc(c.id)}</td></tr>`
-    )
-    .join("");
-  $("mTableWrap").innerHTML = r.candidates.length
-    ? `<table><tr><th></th><th>Name</th><th>Phone</th><th>createdBy.source</th><th>Tags</th><th>ID</th></tr>${rows}</table>`
-    : "<p class='small'>Nothing to migrate 🎉</p>";
-  $("mActions").style.display = r.candidates.length ? "block" : "none";
+  const orig = $("mScan").textContent;
+  $("mScan").textContent = "Scanning…";
+  mCandidates = [];
+  let scanned = 0, hiddenByTag = 0, hiddenByMasterTag = 0;
+  const base = {
+    brokerKey: $("mBroker").value,
+    excludeTags: parseTagList($("mExclude").value),
+    includeTags: parseTagList($("mInclude").value),
+    includeMode: $("mIncludeMode").value,
+    masterIncludeTags: parseTagList($("mMasterInclude").value),
+    masterExcludeTags: parseTagList($("mMasterExclude").value),
+    masterIncludeMode: $("mMasterIncludeMode").value,
+  };
+  $("mTableWrap").innerHTML = `<table id="mTable"><tr><th></th><th>Name</th><th>Phone</th><th>createdBy.source</th><th>Tags</th><th>ID</th></tr></table>`;
+  $("mActions").style.display = "block";
+  let cursor = null, batches = 0;
+  try {
+    do {
+      const body = cursor ? { ...base, startAfterId: cursor.startAfterId, startAfter: cursor.startAfter } : base;
+      const r = await api("/migrate/scan", { method: "POST", body });
+      if (!r.ok) { toast("scan failed: " + (r.error || "unknown")); break; }
+      scanned += r.scanned || 0;
+      hiddenByTag += r.hiddenByTag || 0;
+      hiddenByMasterTag += r.hiddenByMasterTag || 0;
+      mCandidates.push(...r.candidates);
+      const tbl = document.getElementById("mTable");
+      if (tbl) tbl.insertAdjacentHTML("beforeend", r.candidates.map(mRowHtml).join(""));
+      const hid = [];
+      if (hiddenByTag) hid.push(`${hiddenByTag} by broker tags`);
+      if (hiddenByMasterTag) hid.push(`${hiddenByMasterTag} by master tags`);
+      const done = !r.nextCursor;
+      $("mScanSummary").innerHTML =
+        `${done ? "Scanned" : "Scanning…"} <b>${scanned}</b> contacts — <b>${mCandidates.length}</b> would fail the evidence check` +
+        (hid.length ? ` (<b>${hid.join(", ")}</b> hidden)` : "") + (done ? "." : " so far…");
+      cursor = r.nextCursor;
+      batches++;
+    } while (cursor && batches < 200);
+  } finally {
+    $("mScan").disabled = false;
+    $("mScan").textContent = orig;
+  }
+  if (!mCandidates.length) {
+    $("mTableWrap").innerHTML = "<p class='small'>Nothing to migrate 🎉</p>";
+    $("mActions").style.display = "none";
+  }
   updateMigratePolicyNote();
 };
 

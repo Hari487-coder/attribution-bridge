@@ -427,7 +427,9 @@ api.post("/migrate/scan", async (req, res) => {
   try {
     const b = req.body ?? {};
     const result = await bridge.migrateScan(b.brokerKey, store.loadConfig(), {
-      maxPages: Number(b.maxPages) || 10,
+      startAfterId: b.startAfterId,
+      startAfter: b.startAfter,
+      pages: Number(b.pages) || 3,
       includeTags: Array.isArray(b.includeTags) ? b.includeTags : [],
       excludeTags: Array.isArray(b.excludeTags) ? b.excludeTags : [],
       includeMode: b.includeMode === "all" ? "all" : "any",
