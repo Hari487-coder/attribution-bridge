@@ -444,13 +444,15 @@ api.post("/migrate/scan", async (req, res) => {
 });
 
 api.post("/migrate/run", async (req, res) => {
-  const { brokerKey, contactIds, dryRun } = req.body ?? {};
+  const { brokerKey, contactIds, dryRun, overrideTags } = req.body ?? {};
   if (!brokerKey || !Array.isArray(contactIds) || contactIds.length === 0) {
     return res.status(400).json({ ok: false, error: "brokerKey and contactIds[] required" });
   }
   try {
     const result = await bridge.migrateRun(brokerKey, contactIds, store.loadConfig(), {
       dryRun: dryRun !== false, // dry-run unless explicitly disabled
+      // Only override when a non-empty list is supplied; blank = default behavior.
+      overrideTags: Array.isArray(overrideTags) && overrideTags.length ? overrideTags : null,
     });
     res.status(result.ok ? 200 : 422).json(result);
   } catch (err) {

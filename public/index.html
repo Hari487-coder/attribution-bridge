@@ -210,10 +210,18 @@
     <label>Exclude by <b>master</b> account tag (optional, comma-separated)</label>
     <input id="mMasterExclude" placeholder="e.g. do-not-recall">
     <div class="small" style="color:var(--dim);margin-bottom:6px">Hides candidates whose master contact carries one of these tags.</div>
+    <label>Tags for migrated contacts (optional — overrides the global tag settings for this run)</label>
+    <input id="mOverrideTags" placeholder="e.g. migrated-manually  (blank = keep existing + global tags)">
+    <div class="small" style="color:var(--dim);margin-bottom:6px">When set, each migrated contact gets <b>exactly</b> these tags — its old tags and the global "always add" tags are not applied. Leave the trigger tags off to re-migrate a lead <b>without restarting</b> its broker automations. Blank = default behavior.</div>
     <button class="action secondary" id="mScan">Scan for candidates</button>
     <div id="mScanSummary" class="small" style="margin-top:10px"></div>
     <div id="mTableWrap" style="max-height:340px;overflow:auto"></div>
     <div id="mActions" style="display:none">
+      <div style="margin-bottom:6px">
+        <button class="action secondary" id="mSelectAll" style="margin:0;padding:4px 10px">Select all</button>
+        <button class="action secondary" id="mSelectNone" style="margin:0;padding:4px 10px">Deselect all</button>
+        <span class="small" id="mSelCount" style="margin-left:8px"></span>
+      </div>
       <div class="small" id="mPolicyNote" style="margin-bottom:6px"></div>
       <button class="action" id="mDry">Dry-run selected</button>
       <button class="action danger" id="mLive">Migrate selected</button>
@@ -933,7 +941,16 @@ $("mScan").onclick = async () => {
     $("mActions").style.display = "none";
   }
   updateMigratePolicyNote();
+  mUpdateCount();
 };
+
+function mUpdateCount() {
+  const n = document.querySelectorAll("#mTableWrap .mSel:checked").length;
+  $("mSelCount").textContent = n ? `${n} selected` : "";
+}
+$("mSelectAll").onclick = () => { document.querySelectorAll("#mTableWrap .mSel").forEach((c) => (c.checked = true)); mUpdateCount(); };
+$("mSelectNone").onclick = () => { document.querySelectorAll("#mTableWrap .mSel").forEach((c) => (c.checked = false)); mUpdateCount(); };
+document.getElementById("mTableWrap").addEventListener("change", (e) => { if (e.target.classList.contains("mSel")) mUpdateCount(); });
 
 function migratePolicy() {
   return (CONFIG.settings && CONFIG.settings.duplicatePolicy) || "recreate";
@@ -963,10 +980,10 @@ async function runMigrate(dryRun) {
           : `Migrate ${ids.length} contact(s) using "recreate" policy?\n\nThe originals are DELETED — their GHL conversation history in this location is lost.`;
     if (!confirm(msg)) return;
   }
-  const r = await api("/migrate/run", {
-    method: "POST",
-    body: { brokerKey: $("mBroker").value, contactIds: ids, dryRun },
-  });
+  const body = { brokerKey: $("mBroker").value, contactIds: ids, dryRun };
+  const override = parseTagList($("mOverrideTags").value);
+  if (override.length) body.overrideTags = override;
+  const r = await api("/migrate/run", { method: "POST", body });
   $("mResult").style.display = "block";
   $("mResult").textContent = JSON.stringify(r, null, 2);
 }

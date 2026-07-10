@@ -262,6 +262,14 @@ const ok = (name, cond) => {
   // Dry-run reflects the policy without mutating.
   const rDry = await bridge.migrateRun("broker-a", ["broker_pol_skip"], polCfg("strip"), { dryRun: true });
   ok("policy dry-run reports would-strip-recreate", rDry.results[0].action === "would-strip-recreate" && rDry.results[0].policy === "strip");
+  // overrideTags: the migrated contact gets EXACTLY the operator's tags (not its old
+  // tags, not the global add-tags) — so re-migrating won't restart automations.
+  verify.registerVerification({ phone: "+15550911004", evidence: "integration_created", masterContactId: "m" });
+  const rOv = await bridge.migrateRun("broker-a", ["broker_pol_override"], polCfg("recreate"), { dryRun: false, overrideTags: ["manual-migrated"] });
+  ok("overrideTags: migrate succeeds", rOv.results[0].action === "recreated" && !!rOv.results[0].newId);
+  const ovContact = await ghl.getContact(rOv.results[0].newId, "t");
+  ok("overrideTags: contact gets EXACTLY the override tags (no old/app tags)",
+    JSON.stringify((ovContact.tags || []).slice().sort()) === JSON.stringify(["manual-migrated"]));
 
   console.log("one-time (ad-hoc) transfer:");
   // A transient config (source=loc_master, dest=loc_broker_a) drives the same
