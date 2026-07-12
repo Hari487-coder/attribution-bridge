@@ -229,7 +229,11 @@ app.post("/webhook/optout", webhookTenant, async (req, res) => {
       return res.status(400).json({ ok: false, error: `not a valid phone number: ${JSON.stringify(phone)}` });
     }
     const record = verify.withdrawVerification(phone, body.reason || "opt-out webhook");
-    return res.json({ ok: true, record });
+    // Opt-out also suppresses copies already sitting in broker subaccounts (set
+    // DND) so the dialer stops immediately, not just on future bridges.
+    const suppressed = await bridge.suppressAcrossBrokers(record.phone, config).catch((e) => ({ error: e.message }));
+    store.appendLog({ kind: "optout-suppress", phone: record.phone, suppressed });
+    return res.json({ ok: true, record, suppressed });
   } catch (err) {
     return res.status(502).json({ ok: false, error: err.message });
   }
@@ -437,13 +441,18 @@ api.post("/verify/register", async (req, res) => {
 });
 
 /** Withdraw (opt-out) a number — always wins over any verification. */
-api.post("/verify/withdraw", (req, res) => {
+api.post("/verify/withdraw", async (req, res) => {
   const { phone, reason } = req.body ?? {};
   if (!phone) return res.status(400).json({ ok: false, error: "phone required" });
   if (!verify.isPlausiblePhone(phone)) {
     return res.status(400).json({ ok: false, error: `not a valid phone number: ${JSON.stringify(phone)}` });
   }
-  res.json({ ok: true, record: verify.withdrawVerification(phone, reason ?? "manual") });
+  const record = verify.withdrawVerification(phone, reason ?? "manual");
+  // Also suppress any already-bridged broker copies (set DND) so the opt-out
+  // reaches contacts created before the withdrawal, not just future bridges.
+  const suppressed = await bridge.suppressAcrossBrokers(record.phone, store.loadConfig()).catch((e) => ({ error: e.message }));
+  store.appendLog({ kind: "optout-suppress", phone: record.phone, suppressed });
+  res.json({ ok: true, record, suppressed });
 });
 
 api.post("/test-channel", async (req, res) => {

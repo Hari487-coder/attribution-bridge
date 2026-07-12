@@ -811,8 +811,10 @@ async function loadRegistry() {
     : "<p class='small'>No verifications yet — distribute a lead or verify a master contact manually.</p>";
   document.querySelectorAll(".regWithdraw").forEach((b) => {
     b.onclick = async () => {
-      if (!confirm(`Opt out ${b.dataset.phone}? Future bridges of this number will be refused.`)) return;
-      await api("/verify/withdraw", { method: "POST", body: { phone: b.dataset.phone, reason: "manual (registry tab)" } });
+      if (!confirm(`Opt out ${b.dataset.phone}? Future bridges are refused AND any copies already in your broker accounts are set to Do-Not-Call.`)) return;
+      const r = await api("/verify/withdraw", { method: "POST", body: { phone: b.dataset.phone, reason: "manual (registry tab)" } });
+      const n = r?.suppressed?.suppressed?.length || 0;
+      if (n) toast(`Opted out + set ${n} broker cop${n === 1 ? "y" : "ies"} to DND`);
       loadRegistry();
     };
   });
@@ -829,7 +831,11 @@ $("regOptoutBtn").onclick = async () => {
   const r = await api("/verify/withdraw", { method: "POST", body: { phone: $("regOptoutPhone").value.trim(), reason: $("regOptoutReason").value.trim() || undefined } });
   $("regOptoutResult").style.display = "block";
   $("regOptoutResult").textContent = JSON.stringify(r, null, 2);
-  if (r.ok) { toast("Opted out"); loadRegistry(); }
+  if (r.ok) {
+    const n = r.suppressed?.suppressed?.length || 0;
+    toast(n ? `Opted out + set ${n} broker cop${n === 1 ? "y" : "ies"} to DND` : "Opted out");
+    loadRegistry();
+  }
 };
 
 // ── pre-check ──

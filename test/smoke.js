@@ -62,6 +62,11 @@ const ok = (name, cond) => {
   const d2 = await bridge.distributeLead({ contactId: "master_meta_1", brokerKey: "broker-a" }, config);
   ok("recreate replaces copy + passes", d2.ok && d2.deletedDuplicates.includes("broker_copy_1") && d2.verification.passes);
 
+  // STRICT gate end-to-end: an INTEGRATION-only master (the shape a cold-list
+  // import takes) is refused even though the dialer's own gate would allow it.
+  const intOnly = await bridge.distributeLead({ contactId: "master_intonly_1", brokerKey: "broker-a" }, config);
+  ok("distribute REFUSES an INTEGRATION-only master (no real attribution)", intOnly.ok === false && intOnly.refused === true);
+
   console.log("channel test (FIX 4 — deterministic phone):");
   const t = await bridge.testChannel("broker-a", config);
   ok("channel test passes in mock", t.ok && t.passes);
@@ -83,10 +88,12 @@ const ok = (name, cond) => {
   // A verified distribution registers the phone.
   ok("verified distribution registered the number", verify.isVerified("+15551230002") !== null);
 
-  // assessMaster verdicts
-  ok("assessMaster passes an INTEGRATION contact", verify.assessMaster({ phone: "+15550000001", createdBy: { source: "INTEGRATION" } }).verified === true);
+  // assessMaster verdicts (STRICT gate — genuine attribution required)
+  ok("assessMaster passes a contact with real attribution", verify.assessMaster({ phone: "+15550000001", attributionSource: { utmSource: "ig" } }).verified === true);
+  ok("assessMaster REFUSES an INTEGRATION-only contact (cold-list shape)", verify.assessMaster({ phone: "+15550000001", createdBy: { source: "INTEGRATION" } }).verified === false);
+  ok("assessMaster REFUSES junk attribution ({x:false})", verify.assessMaster({ phone: "+15550000004", attributionSource: { x: false } }).verified === false);
   ok("assessMaster refuses a cold contact", verify.assessMaster({ phone: "+15550000002", createdBy: { source: "USER" } }).verified === false);
-  ok("assessMaster refuses a DND contact", verify.assessMaster({ phone: "+15550000003", dnd: true, createdBy: { source: "INTEGRATION" } }).verified === false);
+  ok("assessMaster refuses a DND contact", verify.assessMaster({ phone: "+15550000003", dnd: true, attributionSource: { utmSource: "ig" } }).verified === false);
 
   // Opt-out always wins: withdraw a verified number, then a distribute is refused.
   verify.withdrawVerification("+15551230002", "test opt-out");
@@ -165,7 +172,7 @@ const ok = (name, cond) => {
   const seededAfter = await ghl.getContact(seededId, "t");
   ok("ghl.addTags adds tags via the dedicated endpoint + de-dupes", ["alpha", "beta", "gamma"].every((t) => seededAfter.tags.includes(t)) && seededAfter.tags.filter((t) => t.toLowerCase() === "alpha").length === 1);
   // end-to-end: a bridged contact gets an alwaysAddTag that is NOT on the master.
-  const freshMasterId = (await ghl.createContact("loc_master", { phone: "+15551239000", firstName: "Fresh", tags: ["state-only"] }, "t")).id;
+  const freshMasterId = (await ghl.createContact("loc_master", { phone: "+15551239000", firstName: "Fresh", tags: ["state-only"], attributionSource: { utmSource: "test" } }, "t")).id;
   const forceCfg = { master: { locationId: "loc_master", token: "t", label: "M" }, brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, settings: { duplicatePolicy: "recreate", copyCustomFields: false, bridgeTag: "attribution-bridge", verifiedTag: "castigliaai-verified", tagCopyMode: "none", alwaysAddTags: ["Veterans"] } };
   const forceRun = await bridge.distributeLead({ contactId: freshMasterId, brokerKey: "broker-a" }, forceCfg);
   const forced = forceRun.brokerContactId ? await ghl.getContact(forceRun.brokerContactId, "t") : null;
@@ -175,19 +182,19 @@ const ok = (name, cond) => {
   console.log("tag apply mode (Anthony — Contact-Created vs Tag-Added triggers):");
   const modeBase = { master: { locationId: "loc_master", token: "t" }, brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, settings: { duplicatePolicy: "recreate", copyCustomFields: false, bridgeTag: "attribution-bridge", tagCopyMode: "none", alwaysAddTags: ["Veterans"] } };
   // "create" mode: tags in the create body → present the instant the contact exists.
-  const cmId = (await ghl.createContact("loc_master", { phone: "+15551239100", firstName: "CreateMode" }, "t")).id;
+  const cmId = (await ghl.createContact("loc_master", { phone: "+15551239100", firstName: "CreateMode", attributionSource: { utmSource: "test" } }, "t")).id;
   const createRun = await bridge.distributeLead({ contactId: cmId, brokerKey: "broker-a" }, { ...modeBase, settings: { ...modeBase.settings, tagApplyMode: "create" } });
   const createC = createRun.brokerContactId ? await ghl.getContact(createRun.brokerContactId, "t") : null;
   ok("create mode: tag present on the contact at creation", !!createC && (createC.tags || []).some((t) => t.toLowerCase() === "veterans"));
   ok("create mode: tagsApplied.mode === create", createRun.tagsApplied && createRun.tagsApplied.mode === "create");
   // "after" mode: tags applied via the add-tags event.
-  const amId = (await ghl.createContact("loc_master", { phone: "+15551239200", firstName: "AfterMode" }, "t")).id;
+  const amId = (await ghl.createContact("loc_master", { phone: "+15551239200", firstName: "AfterMode", attributionSource: { utmSource: "test" } }, "t")).id;
   const afterRun = await bridge.distributeLead({ contactId: amId, brokerKey: "broker-a" }, { ...modeBase, settings: { ...modeBase.settings, tagApplyMode: "after" } });
   const afterC = afterRun.brokerContactId ? await ghl.getContact(afterRun.brokerContactId, "t") : null;
   ok("after mode: tag present on the contact via add-tags", !!afterC && (afterC.tags || []).some((t) => t.toLowerCase() === "veterans"));
   ok("after mode: tagsApplied.mode === after", afterRun.tagsApplied && afterRun.tagsApplied.mode === "after");
   // default (unset) mode is "create".
-  const dmId = (await ghl.createContact("loc_master", { phone: "+15551239300", firstName: "DefaultMode" }, "t")).id;
+  const dmId = (await ghl.createContact("loc_master", { phone: "+15551239300", firstName: "DefaultMode", attributionSource: { utmSource: "test" } }, "t")).id;
   const defRun = await bridge.distributeLead({ contactId: dmId, brokerKey: "broker-a" }, modeBase);
   ok("default apply mode is 'create'", defRun.tagsApplied && defRun.tagsApplied.mode === "create");
 
@@ -299,10 +306,24 @@ const ok = (name, cond) => {
   ok("poisoned cold contact was NOT recreated with an INTEGRATION stamp", (await ghl.getContact(coldBroker.id, "t").catch(() => null)) !== null);
   }
 
+  console.log("opt-out suppresses already-bridged broker copies:");
+  // Opt-out must reach copies created BEFORE the withdrawal, not just future
+  // bridges: suppressAcrossBrokers finds the number in every broker and sets DND.
+  const supCfg = { master: { locationId: "loc_master", token: "t", label: "M" }, brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, settings: { duplicatePolicy: "recreate", bridgeTag: "x" } };
+  const supMaster = (await ghl.createContact("loc_master", { phone: "+15551244000", firstName: "SupMaster", attributionSource: { utmSource: "test" } }, "t")).id;
+  const supRun = await bridge.distributeLead({ contactId: supMaster, brokerKey: "broker-a" }, supCfg);
+  ok("opt-out suppress: lead bridged first (broker copy exists)", supRun.ok === true && !!supRun.brokerContactId);
+  const supCopyBefore = await ghl.getContact(supRun.brokerContactId, "t");
+  ok("opt-out suppress: broker copy is callable before opt-out", compliance.isCallDnd(supCopyBefore) === false);
+  const supSummary = await bridge.suppressAcrossBrokers("+15551244000", supCfg);
+  ok("opt-out suppress: found + DND'd the broker copy", supSummary.suppressed.length >= 1 && supSummary.suppressed.some((s) => s.contactId === supRun.brokerContactId));
+  const supCopyAfter = await ghl.getContact(supRun.brokerContactId, "t");
+  ok("opt-out suppress: broker copy is now DND (dialer will skip it)", compliance.isCallDnd(supCopyAfter) === true);
+
   console.log("one-time (ad-hoc) transfer:");
   // A transient config (source=loc_master, dest=loc_broker_a) drives the same
   // masterScan/masterPush the /api/adhoc/* endpoints use — no saved credentials.
-  const adhocSrcId = (await ghl.createContact("loc_master", { phone: "+15551240500", firstName: "AdhocSrc", tags: ["src-tag"] }, "t")).id;
+  const adhocSrcId = (await ghl.createContact("loc_master", { phone: "+15551240500", firstName: "AdhocSrc", tags: ["src-tag"], attributionSource: { utmSource: "test" } }, "t")).id;
   const adhocCfg = { master: { locationId: "loc_master", token: "t", label: "source" }, brokers: { adhoc: { locationId: "loc_broker_a", token: "t", label: "destination" } }, settings: { duplicatePolicy: "skip", tagCopyMode: "all", tagApplyMode: "create" } };
   const adScan = await bridge.masterScan(adhocCfg, { pages: 1 });
   ok("adhoc scan lists the opted-in source contact", adScan.ok && adScan.contacts.some((c) => c.id === adhocSrcId && c.verified === true));

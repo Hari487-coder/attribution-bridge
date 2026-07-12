@@ -123,12 +123,17 @@ calls).
 ## Verified attribution registry
 
 The bridge refuses to distribute a lead unless its **master** record shows genuine
-opt-in (attribution / a real Meta-IG integration / not-DND) — fields GHL sets and
-the customer can't forge. Each verification is HMAC-signed, workspace-scoped, and
-stored per account in `data/tenants/<account>/registry.json`. An **opt-out always
-wins**: withdrawals are sticky
-and never auto-resurrected, and are re-checked immediately before every write.
-CastigliaAI does not read the signature — enforcement is the refusal plus the
+marketing attribution (a populated `attributionSource` / `lastAttributionSource`
+with a real source/medium value) and is not DND or opted out. **Stricter than the
+dialer on purpose:** a bare `createdBy.source = "INTEGRATION"` stamp is NOT
+accepted, because that stamp is also what a cold-list API import carries. Junk
+attribution (empty or non-string values like `{x:false}`) is rejected too. Each
+verification is HMAC-signed, workspace-scoped, and stored per account in
+`data/tenants/<account>/registry.json`. An **opt-out always wins**: withdrawals
+are sticky and never auto-resurrected, are re-checked immediately before every
+write, and now also set any **already-bridged broker copies to Do-Not-Call** so
+the dialer stops on contacts created before the opt-out (not just future ones).
+The dialer does not read the signature — enforcement is the refusal plus the
 `INTEGRATION` stamp; the signed note is an audit trail and a forward-compat hook.
 
 - **Set your country code.** `settings.defaultCallingCode` (Setup tab, digits only)
@@ -142,9 +147,11 @@ CastigliaAI does not read the signature — enforcement is the refusal plus the
 
 ## Tests
 
-- `MOCK=1 node test/smoke.js` — 120 checks: the compliance port, phone-format
+- `MOCK=1 node test/smoke.js` — 132 checks: the compliance port, phone-format
   matching, distribute+verify, recreate, channel test, concurrent-webhook
-  serialization, Tier-1 ops (backup/restore/digest), and the full verification
+  serialization, Tier-1 ops (backup/restore/digest), the strict evidence gate
+  (INTEGRATION-only + junk attribution refused), the registry-poisoning bypass
+  regression, opt-out DND propagation to broker copies, and the full verification
   model (verify-first refusal, opt-out wins incl. international cross-format,
   sticky withdrawals, signature tamper-detection, junk-input rejection).
 - `node test/multitenant.js` — 29 checks: tenant config/registry isolation,
