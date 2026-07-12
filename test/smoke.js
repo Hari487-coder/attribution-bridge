@@ -244,8 +244,9 @@ const ok = (name, cond) => {
 
   console.log("backlog migration honors duplicate policy (Anthony):");
   const polCfg = (policy) => ({ brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, master: { locationId: "loc_master", token: "t" }, settings: { duplicatePolicy: policy, bridgeTag: "attribution-bridge", tagApplyMode: "create" } });
-  // Register the three phones so migrateRun has a verified marker (no master needed).
-  for (const p of ["+15550911001", "+15550911002", "+15550911003"]) verify.registerVerification({ phone: p, evidence: "integration_created", masterContactId: "m" });
+  // migrateRun re-verifies each number against the LIVE master (opted-in master
+  // fixtures on these phones are seeded in ghl.js) — it no longer trusts a stored
+  // registry status, so a manual registerVerification alone would NOT authorize it.
   // SKIP → nothing migrated, original untouched.
   const rSkip = await bridge.migrateRun("broker-a", ["broker_pol_skip"], polCfg("skip"), { dryRun: false });
   ok("policy skip: leaves the contact (action skip)", rSkip.results[0].action === "skip");
@@ -264,12 +265,39 @@ const ok = (name, cond) => {
   ok("policy dry-run reports would-strip-recreate", rDry.results[0].action === "would-strip-recreate" && rDry.results[0].policy === "strip");
   // overrideTags: the migrated contact gets EXACTLY the operator's tags (not its old
   // tags, not the global add-tags) — so re-migrating won't restart automations.
-  verify.registerVerification({ phone: "+15550911004", evidence: "integration_created", masterContactId: "m" });
   const rOv = await bridge.migrateRun("broker-a", ["broker_pol_override"], polCfg("recreate"), { dryRun: false, overrideTags: ["manual-migrated"] });
   ok("overrideTags: migrate succeeds", rOv.results[0].action === "recreated" && !!rOv.results[0].newId);
   const ovContact = await ghl.getContact(rOv.results[0].newId, "t");
   ok("overrideTags: contact gets EXACTLY the override tags (no old/app tags)",
     JSON.stringify((ovContact.tags || []).slice().sort()) === JSON.stringify(["manual-migrated"]));
+
+  console.log("registry-poisoning bypass (must stay closed):");
+  // Regression for the confirmed restore->migrate laundering bypass: an
+  // authenticated user restores a crafted bundle that marks a COLD number
+  // "active", then runs backlog migration to launder it past DNC. The gate must
+  // refuse because opt-in is re-verified against the LIVE master, and the forged
+  // marker's signature does not verify under this workspace's key.
+  {
+  const store = require("../lib/store");
+  const backup = require("../lib/backup");
+  const coldPhone = "+15550933001";
+  const coldBroker = await ghl.createContact("loc_broker_a", { phone: coldPhone, firstName: "ColdPoison", createdBy: { source: "USER", channel: "COPY" } }, "t");
+  const curReg = (() => { try { return JSON.parse(fs.readFileSync(verify.registryPath(), "utf8")); } catch { return {}; } })();
+  const poisonBundle = {
+    kind: "attribution-bridge-backup",
+    version: 1,
+    config: store.loadConfig(),
+    // Preserve existing entries (non-destructive to other tests); inject one forged
+    // "active" record for the cold number — exactly what a crafted restore would do.
+    registry: { ...curReg, [coldPhone]: { phone: coldPhone, status: "active", evidence: "forged", verifiedAt: new Date().toISOString(), sig: "deadbeefdeadbeef" } },
+  };
+  ok("crafted poison bundle restores cleanly (validateBundle only checks shape)", backup.restoreBundle(poisonBundle).ok === true);
+  ok("poisoned entry looks 'active' in the registry", verify.isVerified(coldPhone) !== null);
+  ok("verifyMarker REJECTS the forged marker (bad signature)", verify.verifyMarker(verify.markerFor(coldPhone)) === false);
+  const poisonRun = await bridge.migrateRun("broker-a", [coldBroker.id], polCfg("recreate"), { dryRun: false });
+  ok("migrate REFUSES to launder the poisoned cold number", poisonRun.results[0].action === "skip");
+  ok("poisoned cold contact was NOT recreated with an INTEGRATION stamp", (await ghl.getContact(coldBroker.id, "t").catch(() => null)) !== null);
+  }
 
   console.log("one-time (ad-hoc) transfer:");
   // A transient config (source=loc_master, dest=loc_broker_a) drives the same
@@ -366,11 +394,15 @@ const ok = (name, cond) => {
   const same = bridge.resolveBrokerByTags(["adl", "a", "b"], { tagRouting: { a: "broker-x", b: "broker-x" }, distributionTag: "adl" });
   ok("routing: multiple tags → same broker routes", same.brokerKey === "broker-x");
 
-  // strip must abort BEFORE mutating when the number is opted out (critical fix)
+  // strip must abort BEFORE mutating when the number is opted out (critical fix).
+  // Use a GENUINELY signed marker (register → capture → opt out): even a valid
+  // marker must lose to the pre-write opt-out re-check inside recreateInBroker.
+  verify.registerVerification({ phone: "+15559990002", evidence: "integration_created", masterContactId: "master_strip_2" });
+  const stripMarker = verify.markerFor("+15559990002");
   verify.withdrawVerification("+15559990002", "test opt-out");
   const src = { id: "master_strip_2", phone: "+15559990002", tags: [] };
   const brokerObj = { locationId: "loc_broker_a", token: "t", label: "b" };
-  const wres = await bridge.recreateInBroker(src, "loc_master", "t", brokerObj, { duplicatePolicy: "strip", bridgeTag: "x" }, { evidence: "integration_created" });
+  const wres = await bridge.recreateInBroker(src, "loc_master", "t", brokerObj, { duplicatePolicy: "strip", bridgeTag: "x" }, stripMarker);
   ok("strip: opt-out aborts before mutating", wres.refused === true && wres.step === "withdrawn-midflight");
   const copy2 = await require("../lib/ghl").getContact("broker_strip_copy2", "t");
   ok("strip: old dupe NOT stripped when opted out (phone intact)", copy2.phone === "+15559990002");
