@@ -320,6 +320,33 @@ const ok = (name, cond) => {
   const supCopyAfter = await ghl.getContact(supRun.brokerContactId, "t");
   ok("opt-out suppress: broker copy is now DND (dialer will skip it)", compliance.isCallDnd(supCopyAfter) === true);
 
+  console.log("suppression backstop (RND / litigator / DNC) + consent recency:");
+  {
+  const store = require("../lib/store");
+  const baseCfg = store.loadConfig();
+  // Suppression list: refused even WITH perfect attribution, matched across formats.
+  store.saveConfig({ ...baseCfg, settings: { ...baseCfg.settings, suppressionList: ["+15550999001", "(555) 099-9002"] } });
+  ok("suppressed number refused despite real attribution", verify.assessMaster({ phone: "+15550999001", attributionSource: { utmSource: "ig" } }).verified === false);
+  ok("suppression matches across formats (national entry blocks E.164)", verify.assessMaster({ phone: "+15550999002", attributionSource: { utmSource: "ig" } }).verified === false);
+  ok("isSuppressed true for a listed number (any format)", verify.isSuppressed("5550999001") === true);
+  ok("a non-listed number still passes the gate", verify.assessMaster({ phone: "+15550999003", attributionSource: { utmSource: "ig" } }).verified === true);
+  // Write-path backstop: valid marker but suppressed just before the create.
+  verify.registerVerification({ phone: "+15550999020", evidence: "first_touch", masterContactId: "m" });
+  const supMarker = verify.markerFor("+15550999020");
+  store.saveConfig({ ...baseCfg, settings: { ...baseCfg.settings, suppressionList: ["+15550999020"] } });
+  const supWrite = await bridge.recreateInBroker({ id: "z", phone: "+15550999020" }, "loc_master", "t", { locationId: "loc_broker_a", token: "t", label: "b" }, { duplicatePolicy: "recreate", bridgeTag: "x" }, supMarker);
+  ok("write-path backstop: suppressed number aborts before create", supWrite.refused === true && supWrite.step === "suppressed");
+  // Consent recency guard (proxy on dateAdded).
+  const oldDate = new Date(Date.now() - 60 * 86400000).toISOString();
+  const freshDate = new Date(Date.now() - 5 * 86400000).toISOString();
+  store.saveConfig({ ...baseCfg, settings: { ...baseCfg.settings, maxConsentAgeDays: 30 } });
+  ok("recency: stale master (60d) refused when limit=30", verify.assessMaster({ phone: "+15550999010", attributionSource: { utmSource: "ig" }, dateAdded: oldDate }).verified === false);
+  ok("recency: fresh master (5d) passes when limit=30", verify.assessMaster({ phone: "+15550999011", attributionSource: { utmSource: "ig" }, dateAdded: freshDate }).verified === true);
+  store.saveConfig({ ...baseCfg, settings: { ...baseCfg.settings, maxConsentAgeDays: 0 } });
+  ok("recency: disabled (0) lets an old master pass", verify.assessMaster({ phone: "+15550999012", attributionSource: { utmSource: "ig" }, dateAdded: oldDate }).verified === true);
+  store.saveConfig(baseCfg); // restore so later tests are unaffected
+  }
+
   console.log("one-time (ad-hoc) transfer:");
   // A transient config (source=loc_master, dest=loc_broker_a) drives the same
   // masterScan/masterPush the /api/adhoc/* endpoints use — no saved credentials.

@@ -136,6 +136,16 @@ the dialer stops on contacts created before the opt-out (not just future ones).
 The dialer does not read the signature — enforcement is the refusal plus the
 `INTEGRATION` stamp; the signed note is an audit trail and a forward-compat hook.
 
+- **Suppression list (the in-app DNC backstop).** `settings.suppressionList` (Setup
+  tab, one number per line) is refused BEFORE attribution is even considered and
+  re-checked before every write, so those numbers are never bridged no matter how
+  clean their attribution looks. Load reassigned numbers (RND), known litigators,
+  prior complainers, and any internal do-not-contact set here. Empty = off. This
+  is the independent safety net that stops attribution alone from being the only
+  thing between a bad number and the dialer.
+- **Consent recency (optional).** `settings.maxConsentAgeDays` (0 = off) refuses a
+  lead whose master record is older than N days — a proxy for stale consent that
+  keys off GHL's `dateAdded`, not a true consent timestamp.
 - **Set your country code.** `settings.defaultCallingCode` (Setup tab, digits only)
   canonicalizes registry keys so a national-format opt-out (`07700900123`) matches
   an E.164 master record (`+447700900123`). Default `1` (US/Canada). Set it to your
@@ -147,13 +157,15 @@ The dialer does not read the signature — enforcement is the refusal plus the
 
 ## Tests
 
-- `MOCK=1 node test/smoke.js` — 132 checks: the compliance port, phone-format
+- `MOCK=1 node test/smoke.js` — 140 checks: the compliance port, phone-format
   matching, distribute+verify, recreate, channel test, concurrent-webhook
   serialization, Tier-1 ops (backup/restore/digest), the strict evidence gate
-  (INTEGRATION-only + junk attribution refused), the registry-poisoning bypass
-  regression, opt-out DND propagation to broker copies, and the full verification
-  model (verify-first refusal, opt-out wins incl. international cross-format,
-  sticky withdrawals, signature tamper-detection, junk-input rejection).
+  (INTEGRATION-only + junk attribution refused), the suppression backstop (RND/
+  litigator list refused despite attribution, across formats, re-checked before
+  write) + consent recency, the registry-poisoning bypass regression, opt-out DND
+  propagation to broker copies, and the full verification model (verify-first
+  refusal, opt-out wins incl. international cross-format, sticky withdrawals,
+  signature tamper-detection, junk-input rejection).
 - `node test/multitenant.js` — 29 checks: tenant config/registry isolation,
   login + session sign/verify (tamper-resistant), webhook-key routing +
   uniqueness, disabled-tenant handling, super-admin guards.

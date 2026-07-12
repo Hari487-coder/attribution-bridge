@@ -32,8 +32,9 @@
   .card h2 { font-size: 14px; margin: 0 0 4px; }
   .card p.hint { color: var(--dim); font-size: 12.5px; margin: 0 0 12px; }
   label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 3px; }
-  input, select { width: 100%; max-width: 460px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
-  input:focus, select:focus { outline: 1px solid var(--accent); }
+  input, select, textarea { width: 100%; max-width: 460px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  textarea { font-family: var(--mono); resize: vertical; }
+  input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); }
   button.action { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; cursor: pointer; margin-top: 12px; }
   button.action.secondary { background: var(--panel2); border: 1px solid var(--line); }
   button.action.danger { background: var(--bad); }
@@ -366,6 +367,12 @@
         <label>Default country calling code (for opt-out matching)</label>
         <input id="cfgCallingCode" placeholder="1" style="max-width:120px">
         <div class="small" style="color:var(--dim)">Digits only, no +. "1" = US/Canada. Set to your country (e.g. 44 UK, 61 AU) so a national-format opt-out matches an E.164 record.</div>
+        <label>Suppression list — never bridge these numbers (RND / litigators / complainers / internal DNC)</label>
+        <textarea id="cfgSuppressionList" rows="4" placeholder="one number per line (any format)"></textarea>
+        <div class="small" style="color:var(--dim)">The in-app DNC backstop: enforced BEFORE attribution and re-checked before every write, so these numbers are never bridged no matter how clean their attribution looks. Empty = off. Load your reassigned-number / litigator data here.</div>
+        <label>Consent recency limit (days, 0 = off)</label>
+        <input id="cfgMaxConsentAge" placeholder="0" style="max-width:120px">
+        <div class="small" style="color:var(--dim)">Refuse a lead whose master record is older than this many days (a proxy for stale consent — keys off GHL's dateAdded, not a consent timestamp). 0 disables it.</div>
         <div class="small" id="cfgSecretStatus" style="margin-top:6px"></div>
       </div>
         <label>Alerts &amp; digest webhook URL (a URL you own — e.g. a GHL inbound webhook)</label>
@@ -645,6 +652,8 @@ async function loadConfig() {
   $("cfgVerifiedTag").value = CONFIG.settings.verifiedTag || "";
   $("cfgVerifiedNoteLabel").value = CONFIG.settings.verifiedNoteLabel || "";
   $("cfgCallingCode").value = CONFIG.settings.defaultCallingCode || "1";
+  $("cfgSuppressionList").value = (CONFIG.settings.suppressionList || []).join("\n");
+  $("cfgMaxConsentAge").value = CONFIG.settings.maxConsentAgeDays || 0;
   $("cfgSecretStatus").textContent = CONFIG.signingSecret === "(set)"
     ? "Signing secret: set ✓ (used to sign verification records)"
     : "Signing secret: will be generated on first run";
@@ -729,6 +738,8 @@ $("cfgSave").onclick = async () => {
         verifiedTag: $("cfgVerifiedTag").value.trim() || undefined,
         verifiedNoteLabel: $("cfgVerifiedNoteLabel").value.trim() || undefined,
         defaultCallingCode: ($("cfgCallingCode").value.trim() || "1").replace(/\D/g, "") || "1",
+        suppressionList: $("cfgSuppressionList").value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+        maxConsentAgeDays: Math.max(0, parseInt($("cfgMaxConsentAge").value, 10) || 0),
         distributionTag: $("cfgDistTag").value.trim(),
         alertWebhookUrl: $("cfgAlertUrl").value.trim(),
         backupWebhookUrl: $("cfgBackupUrl").value.trim(),
