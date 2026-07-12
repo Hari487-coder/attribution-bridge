@@ -15,7 +15,13 @@
   header { display: flex; align-items: baseline; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--line); }
   header h1 { font-size: 17px; margin: 0; }
   header .sub { color: var(--dim); font-size: 12.5px; }
-  #mockBadge { margin-left: auto; font-size: 11px; padding: 2px 10px; border-radius: 999px; background: #3a2d10; color: var(--warn); border: 1px solid #5c4a1d; display: none; }
+  #mockBadge { font-size: 11px; padding: 2px 10px; border-radius: 999px; background: #3a2d10; color: var(--warn); border: 1px solid #5c4a1d; display: none; }
+  #acctBar { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  #acctLabel { font-size: 12px; color: var(--dim); }
+  #acctLabel b { color: var(--text); font-weight: 600; }
+  #acctBar a { color: var(--accent); font-size: 12px; text-decoration: none; }
+  #acctBar a:hover { text-decoration: underline; }
+  #acctBar button { margin-top: 0; padding: 5px 12px; font-size: 12px; }
   nav { display: flex; gap: 4px; padding: 10px 24px 0; border-bottom: 1px solid var(--line); }
   nav button { background: none; border: none; color: var(--dim); padding: 8px 14px; cursor: pointer; font-size: 13.5px; border-bottom: 2px solid transparent; }
   nav button.active { color: var(--text); border-bottom-color: var(--accent); }
@@ -61,6 +67,11 @@
   <h1>Attribution Bridge</h1>
   <span class="sub">GHL lead distribution that survives CastigliaAI's DNC attribution check</span>
   <span id="mockBadge">MOCK MODE — no live GHL calls</span>
+  <span id="acctBar">
+    <span id="acctLabel"></span>
+    <a id="acctSwitch" href="/" style="display:none">Switch account</a>
+    <button id="acctLogout" class="action secondary" type="button">Log out</button>
+  </span>
 </header>
 <nav>
   <button data-tab="precheck" class="active">Pre-check</button>
@@ -314,8 +325,7 @@
       <div>
         <label>Webhook key (shared secret for /webhook/lead)</label>
         <input id="cfgWebhookKey" placeholder="generate something long + random">
-        <label>Dashboard password (Basic auth user "admin"; empty = open)</label>
-        <input id="cfgAdminPass" type="password" placeholder="unchanged if left as (set)">
+        <div class="small" style="color:var(--dim);margin-top:4px">This key routes your GHL webhook to this instance — keep it unique and secret.</div>
       </div>
       <div>
         <label>Duplicate policy (broker already has this phone)</label>
@@ -474,6 +484,10 @@ async function api(path, opts = {}) {
   } catch (e) {
     return { ok: false, error: `Can't reach the server (${e.message}). It may be restarting.` };
   }
+  if (res.status === 401) {
+    window.location = "/login";
+    return { ok: false, error: "Session expired — sending you to the login page." };
+  }
   const text = await res.text();
   try {
     return JSON.parse(text);
@@ -620,7 +634,6 @@ async function loadConfig() {
   $("cfgMasterLoc").value = CONFIG.master.locationId || "";
   $("cfgMasterTok").value = CONFIG.master.token || "";
   $("cfgWebhookKey").value = CONFIG.webhookKey || "";
-  $("cfgAdminPass").value = CONFIG.adminPassword || "";
   $("cfgDupPolicy").value = CONFIG.settings.duplicatePolicy;
   $("cfgCopyCf").value = String(CONFIG.settings.copyCustomFields);
   $("cfgTagCopyMode").value = CONFIG.settings.tagCopyMode || "all";
@@ -703,7 +716,6 @@ $("cfgSave").onclick = async () => {
     method: "POST",
     body: {
       webhookKey: $("cfgWebhookKey").value.trim(),
-      adminPassword: $("cfgAdminPass").value,
       master: { locationId: $("cfgMasterLoc").value.trim(), token: $("cfgMasterTok").value.trim() },
       brokers,
       settings: {
@@ -772,7 +784,8 @@ $("alertTest").onclick = async () => {
 async function loadHealth() {
   try {
     const h = await (await fetch("/healthz")).json();
-    $("healthMsg").innerHTML = `Health: ${h.ok ? '<span class="pill ok">ok</span>' : '<span class="pill bad">degraded</span>'} · disk ${h.diskWritable ? "writable ✓" : "NOT writable ✗"} · ${h.configured ? "configured" : "not configured"} · ${h.brokerCount} broker(s)`;
+    const brokerCount = Object.keys(CONFIG.brokers || {}).length;
+    $("healthMsg").innerHTML = `Health: ${h.ok ? '<span class="pill ok">ok</span>' : '<span class="pill bad">degraded</span>'} · disk ${h.diskWritable ? "writable ✓" : "NOT writable ✗"} · this instance: ${brokerCount} broker(s)`;
   } catch { $("healthMsg").textContent = ""; }
 }
 
@@ -1256,6 +1269,36 @@ async function loadLog() {
 }
 $("logRefresh").onclick = loadLog;
 
+// ── account bar (who's logged in / which instance) ──
+async function loadMe() {
+  const r = await api("/me").catch(() => null);
+  if (!r || !r.ok) return;
+  const viewing = r.activeTenantLabel ? `<b>${esc(r.activeTenantLabel)}</b>` : "";
+  if (r.isSuper) {
+    // Super-admin is viewing one instance out of many — show it + a way back.
+    $("acctLabel").innerHTML = `${esc(r.account.label)} · viewing ${viewing || "—"}`;
+    $("acctSwitch").style.display = "";
+  } else {
+    $("acctLabel").innerHTML = `Instance: ${viewing || esc(r.account.label)}`;
+    $("acctSwitch").style.display = "none";
+  }
+}
+$("acctLogout").onclick = async () => {
+  await fetch("/logout", { method: "POST" });
+  window.location = "/login";
+};
+$("acctSwitch").onclick = async (e) => {
+  e.preventDefault();
+  // Return the super-admin to the account picker by clearing the active instance.
+  await fetch("/admin/api/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tenantId: null }),
+  });
+  window.location = "/";
+};
+
+loadMe();
 loadConfig().then(loadLog);
 </script>
 </body>

@@ -12,7 +12,7 @@ const bridge = require("../lib/bridge");
 const verify = require("../lib/verify");
 
 // Isolate the verification registry so runs are deterministic.
-try { fs.rmSync(verify.REGISTRY_PATH, { force: true }); } catch {}
+try { fs.rmSync(verify.registryPath(), { force: true }); } catch {}
 
 let pass = 0;
 const ok = (name, cond) => {
@@ -289,7 +289,7 @@ const ok = (name, cond) => {
   ok("NANP national opt-out matches E.164 lookup", verify.isVerified("+15559998877") === null && verify.isWithdrawn("+15559998877"));
 
   // With a UK default code, national and E.164 converge to one key.
-  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  fs.rmSync(verify.registryPath(), { force: true });
   const store = require("../lib/store");
   const baseCfg = store.loadConfig();
   store.saveConfig({ ...baseCfg, settings: { ...baseCfg.settings, defaultCallingCode: "44" } });
@@ -310,7 +310,7 @@ const ok = (name, cond) => {
 
   console.log("bulk import (master -> broker):");
   // reset registry so opted-out numbers from earlier don't skew the scan
-  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  fs.rmSync(verify.registryPath(), { force: true });
   const scan = await bridge.masterScan(config);
   ok("master scan returns contacts with eligibility", scan.ok && scan.contacts.length >= 3);
   const scanCold = scan.contacts.find((c) => c.id === "master_cold_1");
@@ -334,7 +334,7 @@ const ok = (name, cond) => {
 
   console.log("SOP features:");
   // 3.1 — master scan returns tags
-  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  fs.rmSync(verify.registryPath(), { force: true });
   const scan2 = await bridge.masterScan(config);
   const withTags = scan2.contacts.find((c) => Array.isArray(c.tags) && c.tags.length);
   ok("master scan returns tags on contacts", !!withTags);
@@ -343,7 +343,7 @@ const ok = (name, cond) => {
   // Uses the dedicated strip fixture (master_strip_1 + broker_strip_copy).
   const ghl2 = require("../lib/ghl");
   const stripCfg = { ...config, settings: { ...config.settings, duplicatePolicy: "strip" } };
-  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  fs.rmSync(verify.registryPath(), { force: true });
   const stripRes = await bridge.distributeLead({ contactId: "master_strip_1", brokerKey: "broker-a" }, stripCfg);
   ok("strip policy creates a new contact", stripRes.ok && stripRes.brokerContactId);
   ok("strip policy strips (not deletes) the old dupe", Array.isArray(stripRes.strippedDuplicates) && stripRes.strippedDuplicates.includes("broker_strip_copy") && stripRes.deletedDuplicates.length === 0);
@@ -384,7 +384,7 @@ const ok = (name, cond) => {
   ok("backup bundle has config + registry", bundle.config && bundle.registry && bundle.kind === "attribution-bridge-backup");
   ok("bundle includes the just-registered number", !!bundle.registry[verify.registryKey("+15553334444")]);
   // wipe registry, restore, confirm it comes back
-  fs.rmSync(verify.REGISTRY_PATH, { force: true });
+  fs.rmSync(verify.registryPath(), { force: true });
   ok("registry wiped", verify.isVerified("+15553334444") === null);
   const rest = backup.restoreBundle(bundle);
   ok("restore succeeds", rest.ok === true);
@@ -419,13 +419,13 @@ const ok = (name, cond) => {
   // written — never destroy the only good copy. Force the real writeSnapshot to
   // fail by putting a FILE where its backups/ directory needs to be (mkdir throws).
   const goodBundle = backup.buildBundle();
-  const before = fs.readFileSync(verify.REGISTRY_PATH, "utf8");
-  fs.rmSync(backup.BACKUP_DIR, { recursive: true, force: true });
-  fs.writeFileSync(backup.BACKUP_DIR, "not a directory");
+  const before = fs.readFileSync(verify.registryPath(), "utf8");
+  fs.rmSync(backup.backupDir(), { recursive: true, force: true });
+  fs.writeFileSync(backup.backupDir(), "not a directory");
   const refused = backup.restoreBundle(goodBundle);
-  fs.rmSync(backup.BACKUP_DIR, { force: true }); // clean up the blocking file
+  fs.rmSync(backup.backupDir(), { force: true }); // clean up the blocking file
   ok("restore refuses when the pre-restore snapshot fails", refused.ok === false && /pre-restore snapshot/.test(refused.error));
-  ok("refused restore left the registry untouched", fs.readFileSync(verify.REGISTRY_PATH, "utf8") === before);
+  ok("refused restore left the registry untouched", fs.readFileSync(verify.registryPath(), "utf8") === before);
 
   console.log(`\nALL ${pass} CHECKS PASSED`);
   process.exit(0);

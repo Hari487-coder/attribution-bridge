@@ -15,6 +15,13 @@ services:
         value: /var/data
       - key: PORT
         value: "10000"
+      # Super-admin login (the account picker). Set these at deploy time.
+      # If left unset, a random password is generated and printed to the deploy
+      # logs on first boot (search for "seeded super-admin").
+      - key: SUPERADMIN_USER
+        sync: false
+      - key: SUPERADMIN_PASS
+        sync: false
     disk:
       name: bridge-data
       mountPath: /var/data

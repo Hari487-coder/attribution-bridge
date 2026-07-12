@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accounts · Attribution Bridge</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #161d2e; --panel2: #1c2438; --line: #2a3550;
+    --text: #e6ebf5; --dim: #8b96ad; --accent: #4f8cff; --ok: #3ecf8e;
+    --warn: #f5a623; --bad: #f0556d; --mono: ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { color: var(--dim); font-size: 12.5px; }
+  #acctBar { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  #acctBar span { font-size: 12px; color: var(--dim); }
+  main { padding: 20px 24px 60px; max-width: 920px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 4px; }
+  .card p.hint { color: var(--dim); font-size: 12.5px; margin: 0 0 12px; }
+  label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 3px; }
+  input, select { width: 100%; max-width: 320px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  input:focus, select:focus { outline: 1px solid var(--accent); }
+  button.action { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  button.action.secondary { background: var(--panel2); border: 1px solid var(--line); color: var(--text); }
+  button.action.danger { background: var(--panel2); border: 1px solid #5c2231; color: var(--bad); }
+  button.action:disabled { opacity: .5; cursor: default; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--dim); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  td .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11.5px; }
+  .pill.ok  { background: #10301f; color: var(--ok); border: 1px solid #1d4f36; }
+  .pill.dim { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); }
+  .pill.super { background: #1a2440; color: var(--accent); border: 1px solid #2c3d6b; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .row > div { flex: 1 1 260px; }
+  .msg { font-size: 12.5px; margin-top: 10px; min-height: 16px; color: var(--dim); }
+  .msg.bad { color: var(--bad); }
+  .msg.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Attribution Bridge</h1>
+  <span class="sub">Super-admin · accounts</span>
+  <span id="acctBar">
+    <span id="whoami"></span>
+    <button id="logout" class="action secondary" type="button">Log out</button>
+  </span>
+</header>
+<main>
+  <div class="card">
+    <h2>Accounts</h2>
+    <p class="hint">Each account runs its own isolated instance (its own master, brokers, registry, and activity). Open one to view or configure it as that account. Your changes there are scoped to that instance only.</p>
+    <div id="acctWrap"><p class="hint">Loading…</p></div>
+  </div>
+
+  <div class="card">
+    <h2>Create an account</h2>
+    <p class="hint">Hand the username and password to the team or lead vendor. They sign in and set up their own Master → Broker bridge — no access to anyone else's.</p>
+    <div class="row">
+      <div>
+        <label for="nLabel">Display name</label>
+        <input id="nLabel" placeholder="e.g. Northeast Team">
+      </div>
+      <div>
+        <label for="nUser">Username</label>
+        <input id="nUser" placeholder="e.g. northeast" autocomplete="off">
+      </div>
+      <div>
+        <label for="nPass">Password</label>
+        <input id="nPass" type="text" placeholder="set a strong password" autocomplete="off">
+      </div>
+    </div>
+    <div style="margin-top:14px"><button class="action" id="createBtn">Create account</button></div>
+    <div class="msg" id="createMsg"></div>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  async function jpost(url, body) {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    if (res.status === 401) { window.location = "/login"; return { ok: false }; }
+    try { return await res.json(); } catch { return { ok: false, error: `HTTP ${res.status}` }; }
+  }
+  async function jget(url) {
+    const res = await fetch(url);
+    if (res.status === 401) { window.location = "/login"; return { ok: false }; }
+    try { return await res.json(); } catch { return { ok: false, error: `HTTP ${res.status}` }; }
+  }
+
+  async function loadMe() {
+    const r = await jget("/api/me");
+    if (r.ok) $("whoami").textContent = r.account.label + " (super-admin)";
+  }
+
+  async function loadAccounts() {
+    const r = await jget("/admin/api/accounts");
+    if (!r.ok) { $("acctWrap").innerHTML = "<p class='hint bad'>Couldn't load accounts.</p>"; return; }
+    const users = r.accounts.slice().sort((a, b) => (a.role === "super" ? -1 : b.role === "super" ? 1 : a.label.localeCompare(b.label)));
+    const rows = users.map((a) => {
+      const rolePill = a.role === "super" ? `<span class="pill super">super-admin</span>` : `<span class="pill ${a.disabled ? "dim" : "ok"}">${a.disabled ? "disabled" : "active"}</span>`;
+      let acts = "";
+      if (a.role !== "super") {
+        acts = `<div class="acts">
+          <button class="action open" data-id="${esc(a.id)}"${a.disabled ? " disabled" : ""}>Open</button>
+          <button class="action secondary toggle" data-id="${esc(a.id)}" data-dis="${a.disabled ? 0 : 1}">${a.disabled ? "Enable" : "Disable"}</button>
+          <button class="action danger reset" data-id="${esc(a.id)}" data-label="${esc(a.label)}">Reset password</button>
+        </div>`;
+      } else {
+        acts = `<span class="hint">that's you</span>`;
+      }
+      return `<tr>
+        <td><b>${esc(a.label)}</b></td>
+        <td class="mono">${esc(a.username)}</td>
+        <td>${rolePill}</td>
+        <td>${acts}</td>
+      </tr>`;
+    }).join("");
+    $("acctWrap").innerHTML = `<table><tr><th>Account</th><th>Username</th><th>Status</th><th></th></tr>${rows}</table>`;
+
+    document.querySelectorAll(".open").forEach((b) => b.onclick = async () => {
+      const r = await jpost("/admin/api/open", { tenantId: b.dataset.id });
+      if (r.ok) window.location = "/"; // now viewing that instance
+    });
+    document.querySelectorAll(".toggle").forEach((b) => b.onclick = async () => {
+      await jpost(`/admin/api/accounts/${encodeURIComponent(b.dataset.id)}/disable`, { disabled: b.dataset.dis === "1" });
+      loadAccounts();
+    });
+    document.querySelectorAll(".reset").forEach((b) => b.onclick = async () => {
+      const pw = prompt(`New password for "${b.dataset.label}":`);
+      if (!pw) return;
+      const r = await jpost(`/admin/api/accounts/${encodeURIComponent(b.dataset.id)}/password`, { password: pw });
+      alert(r.ok ? "Password updated." : "Failed: " + (r.error || "unknown"));
+    });
+  }
+
+  $("createBtn").onclick = async () => {
+    const label = $("nLabel").value.trim();
+    const username = $("nUser").value.trim();
+    const password = $("nPass").value;
+    const msg = $("createMsg");
+    msg.className = "msg";
+    if (!username || !password) { msg.className = "msg bad"; msg.textContent = "Username and password are required."; return; }
+    $("createBtn").disabled = true;
+    const r = await jpost("/admin/api/accounts", { label, username, password });
+    $("createBtn").disabled = false;
+    if (r.ok) {
+      msg.className = "msg ok";
+      msg.textContent = `Created "${r.account.label}" — username "${r.account.username}". Share these credentials with them.`;
+      $("nLabel").value = ""; $("nUser").value = ""; $("nPass").value = "";
+      loadAccounts();
+    } else {
+      msg.className = "msg bad";
+      msg.textContent = "Couldn't create: " + (r.error || "unknown");
+    }
+  };
+
+  $("logout").onclick = async () => { await fetch("/logout", { method: "POST" }); window.location = "/login"; };
+
+  loadMe();
+  loadAccounts();
+</script>
+</body>
+</html>

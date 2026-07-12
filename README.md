@@ -15,8 +15,13 @@ instance (required for the persistent disk — the free tier wipes your broker
 tokens and compliance records on every restart). Your API tokens live only on
 your instance; nothing passes through anyone else's infrastructure.
 
-After it deploys: open the URL, go to **Setup**, set a dashboard password and
-webhook key FIRST, then add your master + broker accounts.
+After it deploys: open the URL and **sign in as the super-admin**. Set
+`SUPERADMIN_USER` / `SUPERADMIN_PASS` as env vars before first boot to choose
+those credentials; if you don't, a random password is generated and printed to
+the logs on first boot (search the deploy log for `seeded super-admin`). From the
+super-admin account picker you create one account per team / lead vendor — each
+gets its own isolated instance (its own master, brokers, opt-out registry, and
+webhook key). See **Accounts & login** below.
 
 ## The problem it solves
 
@@ -49,25 +54,51 @@ MOCK=1 node server.js   # demo mode, no GHL credentials needed
 
 Windows PowerShell: `$env:MOCK='1'; node server.js`
 
+## Accounts & login
+
+The app is multi-tenant. Everyone signs in; there is no open dashboard.
+
+- **Super-admin** (one account, seeded from `SUPERADMIN_USER`/`SUPERADMIN_PASS`)
+  sees an **account picker**: create/disable accounts, reset passwords, and
+  **Open** any account to view or configure its instance. There are no account
+  limits.
+- **User accounts** (one per team / lead vendor) each get a fully isolated
+  instance — their own master + brokers, opt-out registry, activity log, and
+  **webhook key**. They can only see their own data, never anyone else's.
+- **Webhooks route by key.** `POST /webhook/lead?key=<that account's webhook
+  key>` is delivered to that account's instance. Keys are globally unique, so an
+  existing GHL workflow keeps working unchanged. No cookie is involved.
+- Upgrading an older single-tenant install? On first boot it is migrated
+  automatically into an account named **valor** (its old dashboard password
+  becomes valor's login password, or set `VALOR_PASS`). Nothing is lost.
+
 ## Setup
 
-1. **Setup tab** — master location ID + API token, one row per broker
-   (key / location ID / token), a long random webhook key, and a dashboard
-   password if the app will be exposed publicly.
-2. **Channel test** each broker. If the stamp isn't `INTEGRATION` for your
+1. **Sign in**, then (super-admin) **Open** the account you're configuring.
+2. **Setup tab** — master location ID + API token, one row per broker
+   (key / location ID / token), and a long random webhook key unique to this
+   account.
+3. **Channel test** each broker. If the stamp isn't `INTEGRATION` for your
    token type, use a GHL OAuth-app connection for that broker instead
    (e.g. a Make/Zapier GHL connection) and re-test.
-3. **Master GHL workflow**: replace Copy Contact with a Webhook action —
+4. **Master GHL workflow**: replace Copy Contact with a Webhook action —
    `POST https://<host>/webhook/lead?key=<webhook key>` with body
    `{"contact_id": "{{contact.id}}", "broker_key": "<key>"}`.
-4. Verify one lead end-to-end, then migrate the backlog.
+5. Verify one lead end-to-end, then migrate the backlog.
 
 ## Hosting
 
 GHL needs HTTPS reachability: `cloudflared tunnel --url http://localhost:3344`
 for a quick tunnel, or deploy to Render/Railway (single `node server.js`, no
-build step). `data/config.json` holds tokens — keep it out of git (see
-.gitignore) and set the dashboard password before exposing.
+build step). Per-account data (tokens, opt-out registry) lives under `DATA_DIR`
+(default `./data`; set it to a persistent disk in production, e.g. `/var/data`
+on Render) in `accounts.json` + `tenants/<account>/…` — keep it out of git (see
+.gitignore). Access is gated by login, so set `SUPERADMIN_PASS` before exposing.
+
+**Environment variables:** `PORT`, `DATA_DIR`, `SUPERADMIN_USER` /
+`SUPERADMIN_PASS` (super-admin login, seeded on first boot), `VALOR_PASS`
+(optional, sets the migrated legacy account's password), `MOCK=1` (demo, no GHL
+calls).
 
 ## Honest limits
 
@@ -94,7 +125,8 @@ build step). `data/config.json` holds tokens — keep it out of git (see
 The bridge refuses to distribute a lead unless its **master** record shows genuine
 opt-in (attribution / a real Meta-IG integration / not-DND) — fields GHL sets and
 the customer can't forge. Each verification is HMAC-signed, workspace-scoped, and
-stored in `data/registry.json`. An **opt-out always wins**: withdrawals are sticky
+stored per account in `data/tenants/<account>/registry.json`. An **opt-out always
+wins**: withdrawals are sticky
 and never auto-resurrected, and are re-checked immediately before every write.
 CastigliaAI does not read the signature — enforcement is the refusal plus the
 `INTEGRATION` stamp; the signed note is an audit trail and a forward-compat hook.
@@ -104,14 +136,22 @@ CastigliaAI does not read the signature — enforcement is the refusal plus the
   an E.164 master record (`+447700900123`). Default `1` (US/Canada). Set it to your
   country or international opt-outs sent in national format may not match.
 - **Clearing an opt-out** is deliberately manual (safety): remove the entry from
-  `data/registry.json`. There is no auto re-opt-in path.
+  that account's `data/tenants/<account>/registry.json`. No auto re-opt-in path.
 - Wire GHL's STOP/opt-out workflow to `POST /webhook/optout` with `{phone}` (or
   `{contact_id}`) to feed opt-outs automatically.
 
 ## Tests
 
-`MOCK=1 node test/smoke.js` — 27 checks covering the compliance port, phone-format
-matching, distribute+verify, recreate, channel test, concurrent-webhook
-serialization, and the full verification model (verify-first refusal, opt-out wins
-incl. international cross-format, sticky withdrawals, signature tamper-detection,
-junk-input rejection). Exit 0 = all pass.
+- `MOCK=1 node test/smoke.js` — 120 checks: the compliance port, phone-format
+  matching, distribute+verify, recreate, channel test, concurrent-webhook
+  serialization, Tier-1 ops (backup/restore/digest), and the full verification
+  model (verify-first refusal, opt-out wins incl. international cross-format,
+  sticky withdrawals, signature tamper-detection, junk-input rejection).
+- `node test/multitenant.js` — 29 checks: tenant config/registry isolation,
+  login + session sign/verify (tamper-resistant), webhook-key routing +
+  uniqueness, disabled-tenant handling, super-admin guards.
+- `node test/migration.js` — 14 checks: the legacy → `valor` migration
+  (files moved, account seeded from the old password, config intact, idempotent).
+
+Exit 0 = all pass. The multi-tenant/migration suites each use a throwaway
+`DATA_DIR`, so run them as separate `node` processes.

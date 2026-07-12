@@ -9,7 +9,6 @@
  */
 
 const path = require("node:path");
-const crypto = require("node:crypto");
 const express = require("express");
 
 const ghl = require("./lib/ghl");
@@ -20,6 +19,7 @@ const verify = require("./lib/verify");
 const backup = require("./lib/backup");
 const stats = require("./lib/stats");
 const scheduler = require("./lib/scheduler");
+const tenant = require("./lib/tenant");
 const fs = require("node:fs");
 
 const app = express();
@@ -34,7 +34,7 @@ const BOOT_AT = new Date().toISOString();
 const PORT = Number(process.env.PORT || 3344);
 
 // ── Public health check (BEFORE auth, so external monitors can probe) ─────────
-// No secrets — booleans and counts only.
+// Tenant-agnostic — no per-account data or secrets, just disk + account count.
 app.get("/healthz", (_req, res) => {
   let diskWritable = false;
   try {
@@ -46,58 +46,110 @@ app.get("/healthz", (_req, res) => {
   } catch {
     diskWritable = false;
   }
-  let cfg = {};
+  let accounts = 0;
   try {
-    cfg = store.loadConfig();
+    accounts = tenant.listAccounts().length;
   } catch {
-    cfg = {};
+    accounts = 0;
   }
-  const configured = !!(cfg.master?.token && Object.keys(cfg.brokers || {}).length);
   const ok = diskWritable; // the one thing that must be true for the pipeline to work
   res.status(ok ? 200 : 503).json({
     ok,
     mock: ghl.isMock(),
     diskWritable,
-    configured,
-    brokerCount: Object.keys(cfg.brokers || {}).length,
-    lastActivityAt: stats.lastActivityAt(), // tail-read only — never parses the whole log
+    accounts,
     bootAt: BOOT_AT,
   });
 });
 
-// ── Auth ─────────────────────────────────────────────────────────────────────
+// ── Auth: login sessions + per-tenant request context ─────────────────────────
+//
+// Accounts live in accounts.json (super-admin + one "user" account per tenant).
+// A successful login sets an HMAC-signed `ab_session` cookie. Dashboard/API
+// requests run inside the active tenant's data context (AsyncLocalStorage), so
+// every store/verify/backup call transparently reads that tenant's files.
+// Webhooks carry no cookie — they resolve their tenant from the webhook key.
 
-function timingSafeEqual(a, b) {
-  const ab = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
+const SESSION_COOKIE = "ab_session";
+const SESSION_MAX_AGE_S = 14 * 24 * 3600;
+
+function parseCookies(req) {
+  const out = {};
+  const raw = req.headers.cookie;
+  if (!raw) return out;
+  for (const part of raw.split(";")) {
+    const i = part.indexOf("=");
+    if (i < 0) continue;
+    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return out;
 }
 
-/** Dashboard/API auth: Basic (admin / config.adminPassword). No password = open (local use). */
-function dashboardAuth(req, res, next) {
-  const config = store.loadConfig();
-  if (!config.adminPassword) return next();
-  const header = req.headers.authorization || "";
-  if (header.startsWith("Basic ")) {
-    const [user, pass] = Buffer.from(header.slice(6), "base64").toString().split(":");
-    if (user === "admin" && timingSafeEqual(pass ?? "", config.adminPassword)) return next();
-  }
-  res.set("WWW-Authenticate", 'Basic realm="attribution-bridge"');
-  return res.status(401).send("Auth required");
+function setSessionCookie(res, payload) {
+  const token = tenant.signSession(payload);
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader(
+    "Set-Cookie",
+    `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_S}${secure}`
+  );
 }
 
-/** Webhook auth: shared key via ?key= or X-Bridge-Key header. */
-function webhookAuth(req, res, next) {
-  const config = store.loadConfig();
-  if (!config.webhookKey) {
-    return res
-      .status(403)
-      .json({ ok: false, error: "webhookKey not configured — set it in Setup before wiring GHL." });
-  }
-  const supplied = req.query.key || req.headers["x-bridge-key"];
-  if (supplied && timingSafeEqual(supplied, config.webhookKey)) return next();
-  return res.status(401).json({ ok: false, error: "bad webhook key" });
+function clearSessionCookie(res) {
+  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+/**
+ * Resolve the live session from the cookie. Returns
+ *   { accountId, role, activeTenant, account }  or  null.
+ * A user account is locked to its own tenant; only a super-admin can carry an
+ * activeTenant chosen at "open" time (null = still at the account picker).
+ */
+function readSession(req) {
+  const token = parseCookies(req)[SESSION_COOKIE];
+  const payload = token ? tenant.verifySession(token) : null;
+  if (!payload) return null;
+  const acct = tenant.getAccount(payload.accountId);
+  if (!acct || acct.disabled) return null;
+  const activeTenant = acct.role === "super" ? payload.activeTenant ?? null : acct.tenantId;
+  return { accountId: acct.id, role: acct.role, activeTenant, account: acct };
+}
+
+function authState(req) {
+  req.session = readSession(req);
+  return req.session;
+}
+
+/** Require login; JSON 401 for API callers. */
+function requireLoginJson(req, res, next) {
+  if (!authState(req)) return res.status(401).json({ ok: false, error: "not logged in" });
+  next();
+}
+
+/** Require login; redirect browsers to the login page. */
+function requireLoginPage(req, res, next) {
+  if (!authState(req)) return res.redirect("/login");
+  next();
+}
+
+/** Super-admin only. */
+function requireSuper(req, res, next) {
+  if (req.session?.role !== "super") return res.status(403).json({ ok: false, error: "super-admin only" });
+  next();
+}
+
+/** Run the rest of the request inside the active tenant's data context. */
+function withTenant(req, res, next) {
+  const tid = req.session?.activeTenant;
+  if (!tid) return res.status(409).json({ ok: false, error: "no account selected" });
+  tenant.runInTenant(tid, () => next());
+}
+
+/** Webhook: resolve the tenant from ?key= / X-Bridge-Key, then run inside it. */
+function webhookTenant(req, res, next) {
+  const key = req.query.key || req.headers["x-bridge-key"];
+  const tid = key ? tenant.resolveTenantByWebhookKey(key) : null;
+  if (!tid) return res.status(401).json({ ok: false, error: "bad or unknown webhook key" });
+  tenant.runInTenant(tid, () => next());
 }
 
 // ── Webhook: master GHL workflow → distribute lead ──────────────────────────
@@ -109,7 +161,7 @@ function webhookAuth(req, res, next) {
  * broker_key can also come from customData.broker_key (GHL nests custom fields
  * there in workflow webhooks) or a query param for per-broker webhook URLs.
  */
-app.post("/webhook/lead", webhookAuth, async (req, res) => {
+app.post("/webhook/lead", webhookTenant, async (req, res) => {
   const config = store.loadConfig();
   const body = req.body ?? {};
   const contactId =
@@ -160,7 +212,7 @@ app.post("/webhook/lead", webhookAuth, async (req, res) => {
  * Body: { phone } or { contact_id } (looked up in the master location).
  * A withdrawal always wins: the number is refused for future bridges.
  */
-app.post("/webhook/optout", webhookAuth, async (req, res) => {
+app.post("/webhook/optout", webhookTenant, async (req, res) => {
   const config = store.loadConfig();
   const body = req.body ?? {};
   let phone = body.phone || body.customData?.phone || null;
@@ -185,8 +237,9 @@ app.post("/webhook/optout", webhookAuth, async (req, res) => {
 
 // ── Dashboard API ────────────────────────────────────────────────────────────
 
+// Auth + tenant context are applied at the mount (app.use("/api", ...)) so every
+// route below runs logged-in and inside the active tenant's data folder.
 const api = express.Router();
-api.use(dashboardAuth);
 
 api.get("/config", (_req, res) => {
   res.json({ ok: true, config: store.redactConfig(store.loadConfig()), mock: ghl.isMock() });
@@ -198,15 +251,14 @@ api.post("/config", (req, res) => {
   const keepToken = (newTok, oldTok) =>
     newTok && !String(newTok).startsWith("…") ? newTok : oldTok;
 
+  const { adminPassword, ...currentSansPassword } = current; // drop the legacy field
   const next = {
-    ...current,
+    ...currentSansPassword,
     webhookKey: incoming.webhookKey ?? current.webhookKey,
     // Never overwrite the signing secret from a redacted round-trip.
     signingSecret: current.signingSecret,
-    adminPassword:
-      incoming.adminPassword === "(set)" || incoming.adminPassword == null
-        ? current.adminPassword
-        : incoming.adminPassword,
+    // adminPassword is no longer used — auth is per-account (see accounts.json).
+    // Omitting it here purges the legacy plaintext field on the next save.
     master: {
       label: incoming.master?.label ?? current.master.label,
       locationId: incoming.master?.locationId ?? current.master.locationId,
@@ -216,19 +268,12 @@ api.post("/config", (req, res) => {
     brokers: current.brokers,
   };
 
-  // A fresh public deployment must not hold API tokens behind an open dashboard:
-  // refuse to store any token until a dashboard password exists.
-  const willHavePassword = !!next.adminPassword;
-  const savingAnyToken =
-    (incoming.master?.token && !String(incoming.master.token).startsWith("…")) ||
-    Object.values(incoming.brokers ?? {}).some(
-      (b) => b?.token && !String(b.token).startsWith("…")
-    );
-  if (savingAnyToken && !willHavePassword) {
-    return res.status(400).json({
+  // The webhook key is how GHL workflows address THIS tenant's bridge. It must be
+  // unique across every account, or a lead would route to the wrong instance.
+  if (next.webhookKey && tenant.webhookKeyTaken(next.webhookKey, req.session.activeTenant)) {
+    return res.status(409).json({
       ok: false,
-      error:
-        "Set a dashboard password before saving API tokens — otherwise anyone with this URL could read your GHL credentials.",
+      error: "That webhook key is already in use by another account. Pick a different one.",
     });
   }
 
@@ -552,14 +597,120 @@ api.post("/adhoc/push", async (req, res) => {
   }
 });
 
-app.use("/api", api);
+// ── Login / session ──────────────────────────────────────────────────────────
 
-// ── UI ───────────────────────────────────────────────────────────────────────
+const PUBLIC = path.join(__dirname, "public");
+const redactAcct = (a) => {
+  if (!a) return null;
+  const { passwordHash, passwordSalt, ...rest } = a;
+  return rest;
+};
 
-app.use("/", dashboardAuth, express.static(path.join(__dirname, "public")));
+app.get("/login", (req, res) => {
+  if (authState(req)) return res.redirect("/");
+  res.sendFile(path.join(PUBLIC, "login.html"));
+});
+
+app.post("/login", (req, res) => {
+  const { username, password } = req.body ?? {};
+  const acct = tenant.verifyLogin(username, password);
+  if (!acct) return res.status(401).json({ ok: false, error: "Invalid username or password." });
+  // A super-admin lands on the account picker (no active tenant); a normal user
+  // goes straight into their own instance.
+  const activeTenant = acct.role === "super" ? null : acct.tenantId;
+  setSessionCookie(res, { accountId: acct.id, activeTenant });
+  res.json({ ok: true, role: acct.role, needsPicker: acct.role === "super" });
+});
+
+app.post("/logout", (req, res) => {
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+// Who am I? (any logged-in account) — powers the header banner + account switch.
+app.get("/api/me", requireLoginJson, (req, res) => {
+  const s = req.session;
+  const activeAcct = s.activeTenant ? tenant.getAccount(s.activeTenant) : null;
+  res.json({
+    ok: true,
+    account: { id: s.accountId, username: s.account.username, label: s.account.label, role: s.role },
+    isSuper: s.role === "super",
+    activeTenant: s.activeTenant,
+    activeTenantLabel: activeAcct?.label ?? null,
+  });
+});
+
+// ── Super-admin: account management ───────────────────────────────────────────
+
+const adminApi = express.Router();
+adminApi.use(requireLoginJson, requireSuper);
+
+adminApi.get("/accounts", (_req, res) => {
+  res.json({ ok: true, accounts: tenant.listAccounts() });
+});
+
+adminApi.post("/accounts", (req, res) => {
+  try {
+    const { username, label, password, role } = req.body ?? {};
+    const acct = tenant.createAccount({ username, label, password, role: role === "super" ? "super" : "user" });
+    res.json({ ok: true, account: redactAcct(acct) });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+adminApi.post("/accounts/:id/disable", (req, res) => {
+  try {
+    tenant.setDisabled(req.params.id, !!req.body?.disabled);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+adminApi.post("/accounts/:id/password", (req, res) => {
+  try {
+    if (!req.body?.password) throw new Error("password required");
+    tenant.setPassword(req.params.id, req.body.password);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// "Open" a tenant: a super-admin re-signs their cookie with the chosen tenant so
+// every following dashboard/API call runs inside that instance. tenantId=null
+// returns them to the account picker.
+adminApi.post("/open", (req, res) => {
+  const tid = req.body?.tenantId || null;
+  if (tid) {
+    const acct = tenant.getAccount(tid);
+    if (!acct || acct.role === "super" || !acct.tenantId) {
+      return res.status(404).json({ ok: false, error: "no such account" });
+    }
+  }
+  setSessionCookie(res, { accountId: req.session.accountId, activeTenant: tid });
+  res.json({ ok: true, activeTenant: tid });
+});
+
+app.use("/admin/api", adminApi);
+
+// ── Dashboard API + UI (login required, scoped to the active tenant) ──────────
+
+app.use("/api", requireLoginJson, withTenant, api);
+
+app.get("/", requireLoginPage, (req, res) => {
+  // Super-admin with no instance selected → the account picker.
+  if (req.session.role === "super" && !req.session.activeTenant) {
+    return res.sendFile(path.join(PUBLIC, "admin.html"));
+  }
+  res.sendFile(path.join(PUBLIC, "index.html"));
+});
+
+app.use("/", requireLoginPage, express.static(PUBLIC));
 
 app.listen(PORT, () => {
-  verify.ensureSigningSecret(); // generate the registry HMAC secret once
+  tenant.migrateLegacyIfNeeded(); // legacy single-tenant → tenants/valor + seed super-admin
   if (!ghl.isMock()) scheduler.start(); // digest/alerts/backup — skip in mock/tests
   const mode = ghl.isMock() ? "MOCK (no GHL calls)" : "LIVE";
   console.log(`attribution-bridge listening on http://localhost:${PORT} [${mode}]`);
