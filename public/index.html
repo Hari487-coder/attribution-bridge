@@ -99,10 +99,12 @@
 <main>
 
 <div class="boundary">
-  <b>Purpose of the bridge.</b> This tool preserves and verifies consent evidence when
-  contacts are recreated across GHL subaccounts, and produces an audit trail. It does
-  <b>not</b> replace CastigliaAI's compliance engine or decide whether a call is legally
-  permitted — final DNC and calling-compliance decisions remain with the platform.
+  <b>Purpose of the bridge.</b> This tool verifies and preserves attribution evidence when
+  contacts are recreated across GHL subaccounts, and produces an audit trail. It treats the
+  <b>master</b> GHL location as the authoritative source of that evidence — it checks the fields
+  satisfy its policy, not that consent is genuine. It does <b>not</b> replace CastigliaAI's
+  compliance engine or decide whether a call is legally permitted; final DNC and
+  calling-compliance decisions remain with the platform.
 </div>
 
 <!-- ── Pre-check ── -->
@@ -161,7 +163,7 @@
 <section id="tab-bulk">
   <div class="card">
     <h2>Bulk import: master → broker</h2>
-    <p class="hint">Pull existing contacts from your <b>master</b> account and create them in a broker sub-account through the API channel — for onboarding a new broker or backfilling leads that arrived before the webhook was wired. Each contact runs through the same verify-first pipeline: only genuinely opted-in leads are pushed, opt-outs are refused, and duplicates follow your duplicate policy. <b>Dry-run first.</b></p>
+    <p class="hint">Pull existing contacts from your <b>master</b> account and create them in a broker sub-account through the API channel — for onboarding a new broker or backfilling leads that arrived before the webhook was wired. Each contact runs through the same verify-first pipeline: only leads whose master record shows acceptable attribution evidence are pushed, opt-outs are refused, and duplicates follow your duplicate policy. <b>Dry-run first.</b></p>
     <label>Target broker</label>
     <select id="bkBroker"></select>
     <button class="action secondary" id="bkScan">Scan master account</button>
@@ -189,7 +191,7 @@
 <section id="tab-registry">
   <div class="card">
     <h2>Verified attribution registry</h2>
-    <p class="hint">The bridge refuses to distribute a lead unless its <b>master</b> record shows genuine opt-in (attribution or a real Meta/IG integration) — so a cold contact dumped into the master can't be laundered past DNC. Each verification is signed (HMAC) and workspace-scoped. An opt-out (withdraw) always wins and is never overridden.</p>
+    <p class="hint">The bridge refuses to distribute a lead unless its <b>master</b> record shows acceptable attribution evidence (a populated attributionSource / lastAttributionSource) — so a cold contact dumped into the master can't be laundered past DNC. This confirms the fields satisfy the policy, not that consent is genuine; the master is treated as the source of consent evidence. Each verification is signed (HMAC) and workspace-scoped. An opt-out (withdraw) always wins and is never overridden.</p>
     <button class="action secondary" id="regRefresh">Refresh</button>
     <div id="regWrap" style="max-height:360px;overflow:auto;margin-top:10px"></div>
   </div>
@@ -264,7 +266,7 @@
 <section id="tab-adhoc">
   <div class="card">
     <h2>One-time transfer</h2>
-    <p class="hint">Transfer opted-in contacts between <b>any</b> two GHL accounts without saving them — for a one-off migration into another master/destination pair. Paste the credentials below; they're used only for this transfer and are <b>never stored</b>. The same rules apply: only genuinely opted-in contacts move, opt-outs are refused, and each is created through the API so it keeps the INTEGRATION stamp.</p>
+    <p class="hint">Transfer opted-in contacts between <b>any</b> two GHL accounts without saving them — for a one-off migration into another master/destination pair. Paste the credentials below; they're used only for this transfer and are <b>never stored</b>. The same rules apply: only contacts whose source record shows acceptable attribution evidence move, opt-outs are refused, and each is created through the API so it keeps the INTEGRATION stamp.</p>
     <div class="row">
       <div>
         <label>Source (from) location ID</label>
@@ -380,7 +382,7 @@
         <input id="cfgVerifiedNoteLabel" placeholder="CastigliaAI attribution verified via master account">
         <label>Master opt-in evidence gate</label>
         <div class="small" style="padding:8px 10px;border:1px solid var(--line,#2a2a2a);border-radius:6px;background:rgba(40,160,90,.12)">
-          🔒 <b>Always on.</b> A lead is created in a broker only when its master record shows genuine opt-in / attribution evidence. This gate is mandatory and cannot be turned off.
+          🔒 <b>Always on.</b> A lead is created in a broker only when its master record shows acceptable attribution evidence. This gate is mandatory and cannot be turned off.
         </div>
         <label>Default country calling code (for opt-out matching)</label>
         <input id="cfgCallingCode" placeholder="1" style="max-width:120px">
@@ -393,7 +395,7 @@
         <div class="small" style="color:var(--dim)">Refuse a lead whose master record is older than this many days (a proxy for stale consent — keys off GHL's dateAdded, not a consent timestamp). 0 disables it.</div>
         <label>Trusted attribution sources (comma-separated, optional)</label>
         <input id="cfgTrustedSources" placeholder="ig, facebook, my-funnel">
-        <div class="small" style="color:var(--dim)">Defense-in-depth for the master as trust anchor: when set, a lead is bridged only if its attribution values contain one of these tokens, so forged/untrusted attribution is refused. Empty = accept any genuine attribution.</div>
+        <div class="small" style="color:var(--dim)">Defense-in-depth for the master as trust anchor: when set, a lead is bridged only if its attribution values contain one of these tokens, so forged/untrusted attribution is refused. Empty = accept any populated attribution.</div>
         <label>Webhook signing secret (optional — HMAC + replay protection)</label>
         <input id="cfgWebhookSigningSecret" type="password" placeholder="leave blank for shared-key only">
         <div class="small" style="color:var(--dim)">When set, /webhook/* requires an <code>X-Bridge-Timestamp</code> + <code>X-Bridge-Signature</code> (HMAC-SHA256 of <code>timestamp.body</code>) within 5 minutes — stronger than the shared key and blocks replays. GHL's native webhook can't sign, so leave blank for GHL and use it for custom/code-capable callers.</div>
@@ -495,7 +497,7 @@
   <div class="card">
     <h2>How the verification model works</h2>
     <ul style="margin:0;padding-left:20px;font-size:13px;line-height:1.9;color:var(--dim)">
-      <li><b>Verify-first:</b> the bridge checks the <i>master</i> contact's genuine opt-in (attribution / real Meta integration / not-DND) — fields GHL sets and the customer can't forge — and refuses to bridge anything that fails. A cold contact dumped into the master won't pass.</li>
+      <li><b>Verify-first:</b> the bridge checks the <i>master</i> contact's attribution evidence (populated attributionSource / lastAttributionSource, not-DND) — fields GHL sets from the source, not the standard contact-update API — and refuses to bridge anything that fails. A cold contact dumped into the master won't pass. <b>Trust boundary:</b> the master GHL location is treated as the authoritative source of consent evidence; the bridge verifies the fields satisfy its policy, not that consent is genuine, and whoever controls the master could still manufacture attribution.</li>
       <li><b>Signed &amp; workspace-scoped:</b> each verification is HMAC-signed and stored per phone, defensible across this master's brokers but never shared to unrelated workspaces.</li>
       <li><b>Opt-out always wins:</b> a withdrawal is never overridden by a later verification. Wire GHL's STOP/opt-out workflow to <code>/webhook/optout</code>.</li>
       <li><b>Honest about enforcement:</b> CastigliaAI does <i>not</i> read the signature — it still allows the call because of the <code>INTEGRATION</code> stamp the bridge applies. The security gain is the webapp <i>refusing to stamp</i> non-opted-in contacts. The signed note is an audit trail + a forward-compat hook if CastigliaAI later adds real server-side verification.</li>

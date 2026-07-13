@@ -4,14 +4,20 @@ Self-hosted web app that lets GHL leads copied from a master sub-account into
 broker sub-accounts **pass CastigliaAI's DNC attribution check** — no CastigliaAI
 backend changes required.
 
-> **Purpose & scope.** This bridge is a **consent-preservation and verification
-> layer** between GHL and CastigliaAI. It preserves and verifies consent evidence
-> when contacts are recreated across GHL subaccounts, and produces an audit trail.
-> It does **not** replace CastigliaAI's compliance engine or decide whether a call
-> is legally permitted — final DNC and calling-compliance decisions remain with the
-> platform. Bridge owns: attribution verification, evidence preservation, broker
-> creation, audit. Platform owns: internal/national DNC, telephony compliance, the
-> call decision.
+> **Purpose & scope.** A **consent-preservation middleware** between GHL and
+> CastigliaAI: it verifies and preserves attribution evidence before recreating
+> contacts across GHL subaccounts, and produces an audit trail. It does **not**
+> replace CastigliaAI's compliance engine or decide whether a call is legally
+> permitted — final compliance and call authorization remain the responsibility of
+> the platform. Bridge owns: attribution verification, evidence preservation,
+> broker creation, audit. Platform owns: internal/national DNC, telephony
+> compliance, the call decision.
+>
+> **Trust boundary.** The **master** GHL location is treated as the authoritative
+> source of consent evidence. The bridge verifies that a master record's
+> attribution fields *satisfy its policy* — it does **not** and cannot prove the
+> consent was genuine, and whoever controls the master could manufacture
+> attribution. This is a proxy for consent, not proof of it.
 
 ## One-click deploy (recommended)
 
@@ -133,9 +139,11 @@ hard-DNC list so the bridge refuses to bridge them too; private, not in the repo
 
 ## Verified attribution registry
 
-The bridge refuses to distribute a lead unless its **master** record shows genuine
-marketing attribution (a populated `attributionSource` / `lastAttributionSource`
-with a real source/medium value) and is not DND or opted out. **Stricter than the
+The bridge refuses to distribute a lead unless its **master** record shows
+acceptable attribution evidence (a populated `attributionSource` /
+`lastAttributionSource` with a real source/medium value) and is not DND or opted
+out. This confirms the fields *satisfy the policy*, not that consent is genuine.
+**Stricter than the
 dialer on purpose:** a bare `createdBy.source = "INTEGRATION"` stamp is NOT
 accepted, because that stamp is also what a cold-list API import carries. Junk
 attribution (empty or non-string values like `{x:false}`) is rejected too. Each
@@ -198,8 +206,8 @@ HMAC `sig` covers every field including the nested `source` and `master`.
 
 **Independent verification protocol** (no secret needed — this is the point):
 1. Read + base64-decode the `<consent>` block off the bridged contact (or `GET /api/verify/consent?phone=…`).
-2. **Re-fetch the referenced `master.contactId` from GHL and confirm it still shows the same attribution and is not DND/opted-out.** GHL sets `attributionSource`/`createdBy`; the customer cannot forge them via the update API, so this is the authoritative, unforgeable check. `GET /api/verify/consent?phone=…&recheck=1` does exactly this live.
-3. The HMAC `sig` is a tamper-evidence bonus (validates under the workspace key); the master re-check above is what actually proves consent.
+2. **Re-fetch the referenced `master.contactId` from GHL and confirm it still shows the same attribution and is not DND/opted-out.** GHL sets `attributionSource`/`createdBy` from the source, not the standard contact-update API, so re-checking the live master is the authoritative check. `GET /api/verify/consent?phone=…&recheck=1` does exactly this live. **Trust boundary:** the master GHL location is the authoritative source of consent evidence — the re-check confirms the fields still satisfy policy, but whoever controls the master could manufacture attribution, which no downstream check can detect.
+3. The HMAC `sig` is a tamper-evidence bonus (validates under the workspace key); the master re-check above is what grounds the attribution evidence.
 
 This is the groundwork for platform-side enforcement: when the dialer verifies
 consent server-side, the evidence is already on every contact.
@@ -232,8 +240,8 @@ The Report tab provides:
 - **Trusted attribution allowlist.** `settings.trustedAttributionSources` — when
   set, a lead is bridged only if its attribution values contain one of these
   tokens, hardening the master-as-trust-anchor against forged/untrusted
-  attribution. Empty = accept any genuine attribution. (The strict gate already
-  blocks the easy vector by requiring a real `attributionSource`, not a bare
+  attribution. Empty = accept any populated attribution. (The strict gate already
+  blocks the easy vector by requiring a populated `attributionSource`, not a bare
   INTEGRATION stamp.)
 
 ## Tests

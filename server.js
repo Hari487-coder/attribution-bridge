@@ -519,7 +519,8 @@ api.post("/verify/withdraw", async (req, res) => {
 // The verifiable consent record for a number. This is what Assistable's backend
 // (or a compliance auditor) reads to confirm a bridged lead's opt-in: it carries
 // the actual attribution values + a pointer to the master record. Set recheck=1
-// to ALSO re-assess the live master (the authoritative, unforgeable check).
+// to ALSO re-assess the live master (the authoritative check — the master is the
+// trust anchor, so this confirms the evidence still satisfies policy).
 api.get("/verify/consent", async (req, res) => {
   const phone = req.query.phone;
   if (!phone || !verify.isPlausiblePhone(phone)) {
