@@ -195,6 +195,20 @@ HMAC `sig` covers every field including the nested `source` and `master`.
 This is the groundwork for platform-side enforcement: when the dialer verifies
 consent server-side, the evidence is already on every contact.
 
+### Observability (the Report tab)
+
+The bridge's job is to *prove* what happened, not to decide who can be called.
+The Report tab provides:
+- **Verification report** — enter a number, get its consent evidence, a Stripe-style
+  event **timeline** (created → verified → migrated → opted-out → suppressed), and
+  the decision, with a **Print / Save PDF** button. The artifact you hand to
+  support or a customer. (`GET /api/report?phone=`)
+- **Explain a decision** — runs every gate (not short-circuit) and lists *all*
+  reasons a master contact would or wouldn't bridge. (`POST /api/verify/explain`)
+- **Audit integrity** — the activity log is a **tamper-evident hash chain**: each
+  event carries `sha256(prevHash + body)`, so deleting or editing any past event
+  breaks every hash after it. Verify it in one click. (`GET /api/audit/verify`)
+
 ### Webhook hardening
 
 - **Replay protection (idempotency).** A duplicate delivery (GHL retry or a

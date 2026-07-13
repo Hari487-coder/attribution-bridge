@@ -61,6 +61,14 @@
   .small { font-size: 12px; color: var(--dim); }
   code { font-family: var(--mono); background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   .toast { position: fixed; bottom: 18px; right: 18px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; font-size: 13px; display: none; }
+  @media print {
+    body * { visibility: hidden; }
+    #reportOut, #reportOut * { visibility: visible; }
+    #reportOut { position: absolute; left: 0; top: 0; width: 100%; }
+    #reportOut .card { background: #fff; color: #111; border: 1px solid #ccc; }
+    #reportOut td, #reportOut b, #reportOut span, #reportOut h2, #reportOut p { color: #111 !important; }
+    #reportOut .pill { background: #fff; color: #111; border: 1px solid #999; }
+  }
 </style>
 </head>
 <body>
@@ -83,6 +91,7 @@
   <button data-tab="adhoc">One-time transfer</button>
   <button data-tab="setup">Setup</button>
   <button data-tab="activity">Activity</button>
+  <button data-tab="report">Report</button>
   <button data-tab="playbook">Playbook</button>
 </nav>
 <main>
@@ -415,6 +424,40 @@
     <h2>Activity log</h2>
     <button class="action secondary" id="logRefresh">Refresh</button>
     <div id="logWrap" style="max-height:520px;overflow:auto"></div>
+  </div>
+</section>
+
+<!-- ── Report ── -->
+<section id="tab-report">
+  <div class="card" id="reportControls">
+    <h2>Verification report</h2>
+    <p class="hint">Prove what happened for any number: its consent evidence, a full timeline, and the decision — the artifact you hand to support or a customer.</p>
+    <div class="row">
+      <div>
+        <label>Phone number</label>
+        <input id="repPhone" placeholder="+1 555 123 4567">
+      </div>
+    </div>
+    <button class="action" id="repRun">Generate report</button>
+    <button class="action secondary" id="repPrint" style="display:none">Print / Save PDF</button>
+    <div class="small" id="repMsg" style="margin-top:8px;color:var(--dim)"></div>
+  </div>
+  <div id="reportOut"></div>
+
+  <div class="card">
+    <h2>Explain a decision</h2>
+    <p class="hint">Why would (or wouldn't) a master contact bridge? Runs every check and lists all reasons — no guessing.</p>
+    <label>Master contact ID</label>
+    <input id="expContact" placeholder="GHL contact id in the master location">
+    <button class="action" id="expRun">Explain</button>
+    <div id="expOut" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Audit integrity</h2>
+    <p class="hint">The activity log is a tamper-evident hash chain — deleting or editing any past event breaks every hash after it. Verify it here.</p>
+    <button class="action secondary" id="auditCheck">Verify audit chain</button>
+    <div id="auditOut" style="margin-top:10px"></div>
   </div>
 </section>
 
@@ -1295,6 +1338,70 @@ async function loadLog() {
   $("logWrap").innerHTML = `<table><tr><th>Time</th><th>Event</th><th>Status</th><th>Detail</th></tr>${rows || ""}</table>`;
 }
 $("logRefresh").onclick = loadLog;
+
+// ── report / explain / audit ──
+function repRow(k, v) {
+  return `<tr><td class="small" style="color:var(--dim);white-space:nowrap">${esc(k)}</td><td class="mono small" style="word-break:break-all">${esc(v == null || v === "" ? "—" : v)}</td></tr>`;
+}
+$("repRun").onclick = async () => {
+  const phone = $("repPhone").value.trim();
+  if (!phone) { $("repMsg").textContent = "Enter a phone number."; return; }
+  $("repMsg").textContent = "Loading…";
+  const r = await api("/report?phone=" + encodeURIComponent(phone));
+  if (!r.ok) { $("repMsg").textContent = r.error || "No report."; $("reportOut").innerHTML = ""; $("repPrint").style.display = "none"; return; }
+  $("repMsg").textContent = "";
+  $("repPrint").style.display = "";
+  const c = r.consent;
+  const decisionPill = r.decision === "verified" ? '<span class="pill ok">verified</span>' : r.decision === "opted-out" ? '<span class="pill bad">opted out</span>' : '<span class="pill warn">not verified</span>';
+  const srcVals = c && c.source && c.source.values ? Object.entries(c.source.values).map(([k, v]) => `${k}=${v}`).join(", ") : "—";
+  const consentRows = c ? [
+    repRow("Phone", c.phone),
+    repRow("Decision", r.decision + (r.signatureValid ? " (signature valid ✓)" : "")),
+    repRow("Evidence", c.evidence),
+    repRow("Attribution source", srcVals),
+    repRow("Master location / contact", (c.master.locationId || "?") + " / " + (c.master.contactId || "?")),
+    repRow("Verified at", c.verifiedAt),
+    repRow("National DNC (recorded)", c.nationalDnc == null ? "not recorded (platform owns this)" : String(c.nationalDnc)),
+    repRow("Bridge version", c.bridgeVersion),
+    repRow("Content hash (SHA-256)", c.hash),
+    repRow("Signature (HMAC)", c.sig),
+  ].join("") : "";
+  const tl = (r.timeline || []).map((e) => {
+    const when = esc(String(e.at || "").replace("T", " ").slice(0, 19));
+    const detail = e.reason || e.error ||
+      (e.kind === "distribute" ? `${e.brokerKey || ""} — ${e.ok ? "bridged" : e.refused ? "refused" : e.idempotent ? "duplicate ignored" : "error"}` :
+       e.kind === "verify-register" ? `attribution ${e.evidence || ""}` :
+       e.kind === "verify-withdraw" ? "opted out" :
+       e.kind === "optout-suppress" ? `set DND on ${(e.suppressed && e.suppressed.suppressed && e.suppressed.suppressed.length) || 0} broker copies` : "");
+    return `<div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)"><span class="mono small" style="color:var(--dim);white-space:nowrap;min-width:130px">${when}</span><b class="small" style="min-width:110px">${esc(e.kind || "event")}</b><span class="small">${esc(detail)}</span></div>`;
+  }).join("");
+  $("reportOut").innerHTML = `<div class="card"><h2>Verification Report ${decisionPill}</h2>
+    ${c ? `<table>${consentRows}</table>` : `<p class="small">No active consent record${r.decision === "opted-out" ? " — this number is opted out." : "."}</p>`}
+    <h2 style="margin-top:18px">Timeline</h2>
+    ${tl || '<p class="small">No events recorded for this number.</p>'}
+    <p class="small" style="margin-top:14px;color:var(--dim)">Generated ${new Date().toISOString().replace("T", " ").slice(0, 19)}. Anyone can re-verify the content hash and re-check the master to confirm this record is untampered.</p>
+  </div>`;
+};
+$("repPrint").onclick = () => window.print();
+
+$("expRun").onclick = async () => {
+  const id = $("expContact").value.trim();
+  if (!id) { $("expOut").innerHTML = '<p class="small">Enter a contact id.</p>'; return; }
+  const r = await api("/verify/explain", { method: "POST", body: { contactId: id } });
+  if (!r.ok) { $("expOut").innerHTML = `<p class="small">${esc(r.error || "failed")}</p>`; return; }
+  const ex = r.explain;
+  const rows = (ex.checks || []).map((ch) => `<div style="display:flex;gap:8px;padding:4px 0"><span>${ch.pass ? "✓" : "✗"}</span><b class="small" style="width:120px;color:var(--dim)">${esc(ch.name)}</b><span class="small">${esc(ch.detail)}</span></div>`).join("");
+  $("expOut").innerHTML = `<div class="verdict ${ex.verified ? "allow" : "block"}"><span class="big">${ex.verified ? "Would bridge ✓" : "Would NOT bridge ✗"}</span></div>${rows}`;
+};
+
+$("auditCheck").onclick = async () => {
+  const r = await api("/audit/verify");
+  if (!r.ok) { $("auditOut").innerHTML = `<p class="small">${esc(r.error || "failed")}</p>`; return; }
+  const ch = r.chain;
+  $("auditOut").innerHTML = ch.ok
+    ? `<span class="pill ok">chain intact</span> <span class="small">${ch.checked} events verified${ch.note ? ` (${esc(ch.note)})` : ""}</span>`
+    : `<span class="pill bad">chain broken</span> <span class="small">at event ${ch.brokenAt}: ${esc(ch.reason || "")}</span>`;
+};
 
 // ── account bar (who's logged in / which instance) ──
 async function loadMe() {

@@ -392,6 +392,35 @@ const ok = (name, cond) => {
   ok("releasing a key allows a re-claim (retry after a transient failure)", store.claimIdempotency(kb + ":d") === true);
   }
 
+  console.log("explain decision (all reasons, not short-circuit):");
+  {
+  const exRefuse = verify.explain({ phone: "+15550000099", createdBy: { source: "INTEGRATION" } });
+  ok("explain: refuses + names the reason (INTEGRATION-only, no attribution)", exRefuse.verified === false && exRefuse.reasons.some((r) => /attribution/i.test(r)));
+  const exMulti = verify.explain({ phone: "+15550000098", dnd: true });
+  ok("explain: lists MULTIPLE failures (DND + no attribution)", exMulti.reasons.length >= 2 && exMulti.reasons.some((r) => /DND/i.test(r)) && exMulti.reasons.some((r) => /attribution/i.test(r)));
+  const exPass = verify.explain({ phone: "+15550000097", attributionSource: { utmSource: "ig" } });
+  ok("explain: a good lead passes every check", exPass.verified === true && exPass.reasons.length === 0);
+  }
+
+  console.log("tamper-evident audit chain:");
+  {
+  const store = require("../lib/store");
+  const path = require("node:path");
+  const logPath = path.join(path.dirname(verify.registryPath()), "activity.jsonl");
+  const before = store.verifyAuditChain();
+  ok("audit chain verifies intact (many events already written)", before.ok === true && before.checked > 0);
+  const orig = fs.readFileSync(logPath, "utf8");
+  const lines = orig.split("\n").filter(Boolean);
+  // Target a HASHED line (older runs left legacy no-hash lines that are skipped).
+  const hashedIdxs = lines.map((_l, i) => i).filter((i) => { try { return JSON.parse(lines[i])._h != null; } catch { return false; } });
+  const delIdx = hashedIdxs[Math.floor(hashedIdxs.length / 2)];
+  fs.writeFileSync(logPath, lines.filter((_l, i) => i !== delIdx).join("\n") + "\n"); // delete one past event
+  const after = store.verifyAuditChain();
+  ok("deleting a past event breaks the chain (detected)", after.ok === false && typeof after.brokenAt === "number");
+  fs.writeFileSync(logPath, orig); // restore
+  ok("restoring the original log makes it verify again", store.verifyAuditChain().ok === true);
+  }
+
   console.log("one-time (ad-hoc) transfer:");
   // A transient config (source=loc_master, dest=loc_broker_a) drives the same
   // masterScan/masterPush the /api/adhoc/* endpoints use — no saved credentials.

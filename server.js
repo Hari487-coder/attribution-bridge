@@ -543,6 +543,52 @@ api.get("/verify/consent", async (req, res) => {
   res.json(out);
 });
 
+/**
+ * Explain a decision: fetch the master and run every gate (not short-circuit) so
+ * support can see EXACTLY why a contact would or wouldn't bridge.
+ */
+api.post("/verify/explain", async (req, res) => {
+  const { contactId } = req.body ?? {};
+  const config = store.loadConfig();
+  if (!contactId) return res.status(400).json({ ok: false, error: "contactId required" });
+  if (!config.master.token) return res.status(400).json({ ok: false, error: "master token not configured" });
+  try {
+    const master = await ghl.getContact(contactId, config.master.token);
+    res.json({ ok: true, explain: verify.explain(master) });
+  } catch (err) {
+    res.status(200).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * Verification Report for a number: the consent record + a Stripe-style timeline
+ * of every event for it + the current decision. This is the artifact you hand to
+ * support or a customer.
+ */
+api.get("/report", (req, res) => {
+  const phone = req.query.phone;
+  if (!phone || !verify.isPlausiblePhone(phone)) {
+    return res.status(400).json({ ok: false, error: "valid ?phone= required" });
+  }
+  const key = verify.registryKey(phone);
+  const consent = verify.consentEvidenceFor(phone); // null if not currently verified
+  const withdrawn = verify.isWithdrawn(phone);
+  const masterId = consent?.master?.contactId ?? null;
+  // Timeline: every audit event that references this number (by phone or its
+  // master contact id), oldest → newest.
+  const timeline = store
+    .readLog({ limit: 5000 })
+    .filter((e) => e.phone === key || (masterId && (e.contactId === masterId || e.masterContactId === masterId)))
+    .reverse();
+  const decision = consent ? "verified" : withdrawn ? "opted-out" : "not-verified";
+  res.json({ ok: true, phone: key, decision, consent, signatureValid: consent ? verify.verifyConsent(consent) : null, timeline });
+});
+
+/** Verify the tamper-evident audit chain for this account. */
+api.get("/audit/verify", (_req, res) => {
+  res.json({ ok: true, chain: store.verifyAuditChain() });
+});
+
 api.post("/test-channel", async (req, res) => {
   try {
     const result = await bridge.testChannel(req.body?.brokerKey, store.loadConfig());
