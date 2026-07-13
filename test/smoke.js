@@ -363,7 +363,27 @@ const ok = (name, cond) => {
   ok("recency: fresh master (5d) passes when limit=30", verify.assessMaster({ phone: "+15550999011", attributionSource: { utmSource: "ig" }, dateAdded: freshDate }).verified === true);
   store.saveConfig({ ...baseCfg, settings: { ...baseCfg.settings, maxConsentAgeDays: 0 } });
   ok("recency: disabled (0) lets an old master pass", verify.assessMaster({ phone: "+15550999012", attributionSource: { utmSource: "ig" }, dateAdded: oldDate }).verified === true);
+  // Trusted-attribution allowlist (defense for the master trust anchor).
+  store.saveConfig({ ...baseCfg, settings: { ...baseCfg.settings, trustedAttributionSources: ["ig", "facebook"] } });
+  ok("allowlist: attribution from a trusted source passes", verify.assessMaster({ phone: "+15550999030", attributionSource: { utmSource: "ig" } }).verified === true);
+  ok("allowlist: attribution from an untrusted source is refused", verify.assessMaster({ phone: "+15550999031", attributionSource: { utmSource: "sketchy-vendor" } }).verified === false);
+  store.saveConfig({ ...baseCfg, settings: { ...baseCfg.settings, trustedAttributionSources: [] } });
+  ok("allowlist empty: any genuine attribution passes", verify.assessMaster({ phone: "+15550999032", attributionSource: { utmSource: "anything" } }).verified === true);
   store.saveConfig(baseCfg); // restore so later tests are unaffected
+  }
+
+  console.log("webhook idempotency (replay protection):");
+  {
+  const store = require("../lib/store");
+  // The store persists across runs, so key each run uniquely.
+  const kb = "idem-" + Date.now();
+  ok("first claim of a key proceeds", store.claimIdempotency(kb + ":a") === true);
+  ok("immediate replay of the same key is rejected (duplicate)", store.claimIdempotency(kb + ":a") === false);
+  ok("a different contact/broker key still proceeds", store.claimIdempotency(kb + ":b") === true);
+  ok("an expired entry is reclaimable", store.claimIdempotency(kb + ":c", 0) === true && store.claimIdempotency(kb + ":c", 0) === true);
+  store.claimIdempotency(kb + ":d");
+  store.releaseIdempotency(kb + ":d");
+  ok("releasing a key allows a re-claim (retry after a transient failure)", store.claimIdempotency(kb + ":d") === true);
   }
 
   console.log("one-time (ad-hoc) transfer:");

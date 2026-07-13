@@ -9,6 +9,7 @@
  */
 
 const path = require("node:path");
+const crypto = require("node:crypto");
 const express = require("express");
 
 const ghl = require("./lib/ghl");
@@ -26,9 +27,38 @@ const app = express();
 // Only the restore endpoint accepts a large body (a full backup bundle). Every
 // other route — including the pre-auth webhooks — gets a tight limit so an
 // unauthenticated caller can't make the server buffer/parse a big payload.
-const jsonSmall = express.json({ limit: "1mb" });
-const jsonLarge = express.json({ limit: "8mb" });
+// Capture the raw body so a webhook HMAC can be verified over the exact bytes.
+const keepRaw = (req, _res, buf) => { req.rawBody = buf; };
+const jsonSmall = express.json({ limit: "1mb", verify: keepRaw });
+const jsonLarge = express.json({ limit: "8mb", verify: keepRaw });
 app.use((req, res, next) => (req.path === "/api/restore" ? jsonLarge : jsonSmall)(req, res, next));
+
+/** Merge settings, preserving the webhook signing secret across a redacted round-trip. */
+function mergeSettings(current, incoming) {
+  const merged = { ...current, ...(incoming ?? {}) };
+  const inSecret = incoming?.webhookSigningSecret;
+  if (inSecret === "(set)" || inSecret == null) merged.webhookSigningSecret = current?.webhookSigningSecret ?? "";
+  return merged;
+}
+
+/**
+ * Verify an optional HMAC-signed webhook. Returns { ok } or { ok:false, error }.
+ * Signature = hex HMAC-SHA256 of `${timestamp}.${rawBody}` under the tenant's
+ * webhookSigningSecret; the timestamp (ms epoch) must be within 5 minutes to
+ * block replay. GHL's native webhook can't sign, so this is opt-in per tenant.
+ */
+function verifyWebhookSignature(secret, timestamp, signature, rawBody) {
+  if (!timestamp || !signature) return { ok: false, error: "missing X-Bridge-Timestamp/X-Bridge-Signature" };
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 5 * 60 * 1000) {
+    return { ok: false, error: "timestamp missing, invalid, or outside the 5-minute window (replay?)" };
+  }
+  const expected = crypto.createHmac("sha256", secret).update(`${timestamp}.${rawBody ? rawBody.toString() : ""}`).digest("hex");
+  const a = Buffer.from(String(signature));
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { ok: false, error: "bad signature" };
+  return { ok: true };
+}
 
 const BOOT_AT = new Date().toISOString();
 const PORT = Number(process.env.PORT || 3344);
@@ -149,7 +179,16 @@ function webhookTenant(req, res, next) {
   const key = req.query.key || req.headers["x-bridge-key"];
   const tid = key ? tenant.resolveTenantByWebhookKey(key) : null;
   if (!tid) return res.status(401).json({ ok: false, error: "bad or unknown webhook key" });
-  tenant.runInTenant(tid, () => next());
+  tenant.runInTenant(tid, () => {
+    // If this tenant enabled webhook signing, the shared key alone isn't enough:
+    // require a fresh, valid HMAC signature (stronger auth + replay protection).
+    const secret = store.loadConfig().settings?.webhookSigningSecret;
+    if (secret) {
+      const check = verifyWebhookSignature(secret, req.headers["x-bridge-timestamp"], req.headers["x-bridge-signature"], req.rawBody);
+      if (!check.ok) return res.status(401).json({ ok: false, error: `signed webhook required: ${check.error}` });
+    }
+    next();
+  });
 }
 
 // ── Webhook: master GHL workflow → distribute lead ──────────────────────────
@@ -178,6 +217,7 @@ app.post("/webhook/lead", webhookTenant, async (req, res) => {
     return res.status(400).json({ ok: false, error: "Need contact_id (in body, customData, or as id)." });
   }
 
+  let idemKey = null;
   try {
     // Auto-route by tag (SOP 3.3) when no explicit broker_key was sent: read the
     // master contact's tags and match them against the tag→broker map.
@@ -199,9 +239,26 @@ app.post("/webhook/lead", webhookTenant, async (req, res) => {
       }
     }
 
+    // Replay protection: a duplicate delivery (GHL retry, or a replayed request)
+    // for the same contact→broker within the window is a no-op, so it can't create
+    // a duplicate or churn a "recreate"-policy contact. An explicit event id in the
+    // body tightens the key when the caller supplies one.
+    const eventId = body.event_id || body.eventId || body.idempotency_key || "";
+    idemKey = `${contactId}:${brokerKey}:${eventId}`;
+    if (!store.claimIdempotency(idemKey)) {
+      store.appendLog({ kind: "distribute", ok: true, idempotent: true, contactId, brokerKey });
+      return res.status(200).json({ ok: true, idempotent: true, note: "duplicate webhook ignored (already processed recently)" });
+    }
+
     const result = await bridge.distributeLead({ contactId, brokerKey }, config);
+    // Idempotency remembers OUTCOMES, not attempts: keep the key on success or a
+    // deterministic refusal (opt-out / no-attribution / suppressed — a retry would
+    // just refuse again), but release it on a transient/config error so a genuine
+    // retry can proceed instead of being silently swallowed for the TTL.
+    if (result.ok === false && !result.refused) store.releaseIdempotency(idemKey);
     return res.status(result.ok ? 200 : 422).json({ ...result, routedBy: routed ? `tag:${routed.matchedTag}` : "explicit" });
   } catch (err) {
+    if (idemKey) store.releaseIdempotency(idemKey); // transient throw — allow retry
     store.appendLog({ kind: "distribute", ok: false, brokerKey, contactId, error: err.message });
     return res.status(200).json({ ok: false, error: err.message });
   }
@@ -268,7 +325,7 @@ api.post("/config", (req, res) => {
       locationId: incoming.master?.locationId ?? current.master.locationId,
       token: keepToken(incoming.master?.token, current.master.token),
     },
-    settings: { ...current.settings, ...(incoming.settings ?? {}) },
+    settings: mergeSettings(current.settings, incoming.settings),
     brokers: current.brokers,
   };
 

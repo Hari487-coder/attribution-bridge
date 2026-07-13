@@ -182,6 +182,24 @@ HMAC `sig` covers every field including the nested `source` and `master`.
 This is the groundwork for platform-side enforcement: when the dialer verifies
 consent server-side, the evidence is already on every contact.
 
+### Webhook hardening
+
+- **Replay protection (idempotency).** A duplicate delivery (GHL retry or a
+  replayed request) for the same `contact → broker` within a 10-minute window is
+  a no-op, so it can't create a duplicate or churn a "recreate"-policy contact.
+  A `event_id` / `idempotency_key` in the body tightens the key when supplied.
+- **Optional HMAC signing.** Set `settings.webhookSigningSecret` (Setup tab) and
+  `/webhook/*` then requires `X-Bridge-Timestamp` + `X-Bridge-Signature`
+  (HMAC-SHA256 of `` `${timestamp}.${rawBody}` ``) within 5 minutes — stronger
+  auth than the shared key and blocks replay. GHL's native webhook can't sign,
+  so leave it blank for GHL and use it for code-capable callers.
+- **Trusted attribution allowlist.** `settings.trustedAttributionSources` — when
+  set, a lead is bridged only if its attribution values contain one of these
+  tokens, hardening the master-as-trust-anchor against forged/untrusted
+  attribution. Empty = accept any genuine attribution. (The strict gate already
+  blocks the easy vector by requiring a real `attributionSource`, not a bare
+  INTEGRATION stamp.)
+
 ## Tests
 
 - `MOCK=1 node test/smoke.js` — 146 checks: the compliance port, phone-format

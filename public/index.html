@@ -373,6 +373,12 @@
         <label>Consent recency limit (days, 0 = off)</label>
         <input id="cfgMaxConsentAge" placeholder="0" style="max-width:120px">
         <div class="small" style="color:var(--dim)">Refuse a lead whose master record is older than this many days (a proxy for stale consent — keys off GHL's dateAdded, not a consent timestamp). 0 disables it.</div>
+        <label>Trusted attribution sources (comma-separated, optional)</label>
+        <input id="cfgTrustedSources" placeholder="ig, facebook, my-funnel">
+        <div class="small" style="color:var(--dim)">Defense-in-depth for the master as trust anchor: when set, a lead is bridged only if its attribution values contain one of these tokens, so forged/untrusted attribution is refused. Empty = accept any genuine attribution.</div>
+        <label>Webhook signing secret (optional — HMAC + replay protection)</label>
+        <input id="cfgWebhookSigningSecret" type="password" placeholder="leave blank for shared-key only">
+        <div class="small" style="color:var(--dim)">When set, /webhook/* requires an <code>X-Bridge-Timestamp</code> + <code>X-Bridge-Signature</code> (HMAC-SHA256 of <code>timestamp.body</code>) within 5 minutes — stronger than the shared key and blocks replays. GHL's native webhook can't sign, so leave blank for GHL and use it for custom/code-capable callers.</div>
         <div class="small" id="cfgSecretStatus" style="margin-top:6px"></div>
       </div>
         <label>Alerts &amp; digest webhook URL (a URL you own — e.g. a GHL inbound webhook)</label>
@@ -654,6 +660,8 @@ async function loadConfig() {
   $("cfgCallingCode").value = CONFIG.settings.defaultCallingCode || "1";
   $("cfgSuppressionList").value = (CONFIG.settings.suppressionList || []).join("\n");
   $("cfgMaxConsentAge").value = CONFIG.settings.maxConsentAgeDays || 0;
+  $("cfgTrustedSources").value = (CONFIG.settings.trustedAttributionSources || []).join(", ");
+  $("cfgWebhookSigningSecret").value = CONFIG.settings.webhookSigningSecret || "";
   $("cfgSecretStatus").textContent = CONFIG.signingSecret === "(set)"
     ? "Signing secret: set ✓ (used to sign verification records)"
     : "Signing secret: will be generated on first run";
@@ -740,6 +748,8 @@ $("cfgSave").onclick = async () => {
         defaultCallingCode: ($("cfgCallingCode").value.trim() || "1").replace(/\D/g, "") || "1",
         suppressionList: $("cfgSuppressionList").value.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
         maxConsentAgeDays: Math.max(0, parseInt($("cfgMaxConsentAge").value, 10) || 0),
+        trustedAttributionSources: $("cfgTrustedSources").value.split(",").map((s) => s.trim()).filter(Boolean),
+        webhookSigningSecret: $("cfgWebhookSigningSecret").value,
         distributionTag: $("cfgDistTag").value.trim(),
         alertWebhookUrl: $("cfgAlertUrl").value.trim(),
         backupWebhookUrl: $("cfgBackupUrl").value.trim(),
