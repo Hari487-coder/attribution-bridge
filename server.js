@@ -250,7 +250,11 @@ app.post("/webhook/lead", webhookTenant, async (req, res) => {
       return res.status(200).json({ ok: true, idempotent: true, note: "duplicate webhook ignored (already processed recently)" });
     }
 
-    const result = await bridge.distributeLead({ contactId, brokerKey }, config);
+    // national_dnc is an OPTIONAL pass-through from an authoritative caller (the
+    // bridge never looks it up itself — that stays Assistable's job); recorded for
+    // the audit trail when supplied.
+    const nationalDnc = typeof body.national_dnc === "boolean" ? body.national_dnc : null;
+    const result = await bridge.distributeLead({ contactId, brokerKey, nationalDnc }, config);
     // Idempotency remembers OUTCOMES, not attempts: keep the key on success or a
     // deterministic refusal (opt-out / no-attribution / suppressed — a retry would
     // just refuse again), but release it on a transient/config error so a genuine

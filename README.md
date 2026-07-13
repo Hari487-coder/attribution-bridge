@@ -148,15 +148,19 @@ The dialer does not read the signature — enforcement is the refusal plus the
 - **Consent recency (optional).** `settings.maxConsentAgeDays` (0 = off) refuses a
   lead whose master record is older than N days — a proxy for stale consent that
   keys off GHL's `dateAdded`, not a true consent timestamp.
-- **National DNC recording (optional).** `settings.nationalDncCheck` (off by
-  default) makes the bridge check the national registry (FreeDNCList, best-effort/
-  fail-open) at bridge time and record the result on the consent record. This
-  completes the platform's 3-part policy on the bridge side: **internal DNC
-  (opt-out + suppression) is always absolute** (checked before attribution, unlike
-  the platform's own gate); a lead **on the national DNC is still bridged when it
-  has genuine attribution** (the opt-in exemption), now with an audit note that you
-  relied on it; a lead **without attribution is refused** regardless. Turning it on
-  gives you a defensible, documented 3-part decision per lead.
+- **Separation of concerns — the bridge does NOT look up DNC.** National DNC,
+  internal DNC, and telephony compliance belong to the platform; duplicating them
+  here would only drift when the platform changes provider/exemption/state logic.
+  The bridge owns **attribution + consent verification, audit, and broker creation**.
+  Its `internal DNC` (opt-out + suppression) is enforced *absolutely, before
+  attribution* — but as the bridge's own opt-out ledger, not a copy of the
+  platform's engine. National-DNC status is **recorded** on the consent record only
+  when an authoritative source passes it in (`national_dnc` in the webhook body);
+  the bridge never queries a registry itself.
+- **Tamper-evidence + content ID.** Each consent record carries `sig` (HMAC under
+  the workspace key — the real tamper-evidence) and `hash` (keyless SHA-256 of the
+  canonical payload — a stable content ID for referencing/correlating, not a
+  security control on its own), plus `bridgeVersion` for provenance.
 - **Set your country code.** `settings.defaultCallingCode` (Setup tab, digits only)
   canonicalizes registry keys so a national-format opt-out (`07700900123`) matches
   an E.164 master record (`+447700900123`). Default `1` (US/Canada). Set it to your

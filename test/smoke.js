@@ -87,7 +87,9 @@ const ok = (name, cond) => {
   // National-DNC status recorded on the consent record (Jorden rule 2 audit).
   verify.registerVerification({ phone: "+15551230055", evidence: "first_touch", source: { field: "attributionSource", values: { utmSource: "ig" } }, masterContactId: "m", masterLocationId: "loc_master", nationalDnc: true });
   const dncConsent = verify.consentEvidenceFor("+15551230055");
-  ok("consent record records national-DNC status + still verifies", dncConsent.nationalDnc === true && verify.verifyConsent(dncConsent) === true);
+  ok("consent record records national-DNC status (pass-through) + still verifies", dncConsent.nationalDnc === true && verify.verifyConsent(dncConsent) === true);
+  ok("consent record carries a content hash (SHA-256) + bridge version", typeof dncConsent.hash === "string" && dncConsent.hash.length === 64 && dncConsent.bridgeVersion === require("../package.json").version);
+  ok("HMAC sig (not the hash) is the real tamper control — editing master breaks it", verify.verifyConsent({ ...dncConsent, master: { locationId: "evil", contactId: "evil" } }) === false);
 
   console.log("channel test (FIX 4 — deterministic phone):");
   const t = await bridge.testChannel("broker-a", config);
