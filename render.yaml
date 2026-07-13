@@ -22,6 +22,12 @@ services:
         sync: false
       - key: SUPERADMIN_PASS
         sync: false
+      # Platform hard-DNC list (comma-separated, any format) — numbers the dialer
+      # never calls. Set this to match the platform's own list so the bridge never
+      # creates a contact the dialer would refuse. The value is private, so it is
+      # not shipped in the repo; set it here at deploy time.
+      - key: PLATFORM_DNC
+        sync: false
     disk:
       name: bridge-data
       mountPath: /var/data

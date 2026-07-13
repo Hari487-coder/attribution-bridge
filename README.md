@@ -97,8 +97,10 @@ on Render) in `accounts.json` + `tenants/<account>/…` — keep it out of git (
 
 **Environment variables:** `PORT`, `DATA_DIR`, `SUPERADMIN_USER` /
 `SUPERADMIN_PASS` (super-admin login, seeded on first boot), `VALOR_PASS`
-(optional, sets the migrated legacy account's password), `MOCK=1` (demo, no GHL
-calls).
+(optional, sets the migrated legacy account's password), `PLATFORM_DNC`
+(comma-separated numbers the dialer never calls — set it to match the platform's
+hard-DNC list so the bridge refuses to bridge them too; private, not in the repo),
+`MOCK=1` (demo, no GHL calls).
 
 ## Honest limits
 

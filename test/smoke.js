@@ -111,6 +111,7 @@ const ok = (name, cond) => {
   ok("assessMaster REFUSES an INTEGRATION-only contact (cold-list shape)", verify.assessMaster({ phone: "+15550000001", createdBy: { source: "INTEGRATION" } }).verified === false);
   ok("assessMaster REFUSES junk attribution ({x:false})", verify.assessMaster({ phone: "+15550000004", attributionSource: { x: false } }).verified === false);
   ok("assessMaster refuses a cold contact", verify.assessMaster({ phone: "+15550000002", createdBy: { source: "USER" } }).verified === false);
+  ok("assessMaster refuses a platform hard-DNC number despite attribution (mirrors dialer step 0)", verify.assessMaster({ phone: "+15550001111", attributionSource: { utmSource: "ig" } }).verified === false);
   ok("assessMaster refuses a DND contact", verify.assessMaster({ phone: "+15550000003", dnd: true, attributionSource: { utmSource: "ig" } }).verified === false);
 
   // Opt-out always wins: withdraw a verified number, then a distribute is refused.
