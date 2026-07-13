@@ -84,6 +84,10 @@ const ok = (name, cond) => {
   const evil = { ...consent, source: { field: "attributionSource", values: { utmSource: "x</consent><script>" } } };
   const evilNote = verify.consentNote(evil, verify.markerFor("+15551230002"));
   ok("delimiter-injecting value cannot corrupt the consent block", verify.parseConsentNote(evilNote) !== null);
+  // National-DNC status recorded on the consent record (Jorden rule 2 audit).
+  verify.registerVerification({ phone: "+15551230055", evidence: "first_touch", source: { field: "attributionSource", values: { utmSource: "ig" } }, masterContactId: "m", masterLocationId: "loc_master", nationalDnc: true });
+  const dncConsent = verify.consentEvidenceFor("+15551230055");
+  ok("consent record records national-DNC status + still verifies", dncConsent.nationalDnc === true && verify.verifyConsent(dncConsent) === true);
 
   console.log("channel test (FIX 4 — deterministic phone):");
   const t = await bridge.testChannel("broker-a", config);

@@ -148,6 +148,15 @@ The dialer does not read the signature — enforcement is the refusal plus the
 - **Consent recency (optional).** `settings.maxConsentAgeDays` (0 = off) refuses a
   lead whose master record is older than N days — a proxy for stale consent that
   keys off GHL's `dateAdded`, not a true consent timestamp.
+- **National DNC recording (optional).** `settings.nationalDncCheck` (off by
+  default) makes the bridge check the national registry (FreeDNCList, best-effort/
+  fail-open) at bridge time and record the result on the consent record. This
+  completes the platform's 3-part policy on the bridge side: **internal DNC
+  (opt-out + suppression) is always absolute** (checked before attribution, unlike
+  the platform's own gate); a lead **on the national DNC is still bridged when it
+  has genuine attribution** (the opt-in exemption), now with an audit note that you
+  relied on it; a lead **without attribution is refused** regardless. Turning it on
+  gives you a defensible, documented 3-part decision per lead.
 - **Set your country code.** `settings.defaultCallingCode` (Setup tab, digits only)
   canonicalizes registry keys so a national-format opt-out (`07700900123`) matches
   an E.164 master record (`+447700900123`). Default `1` (US/Canada). Set it to your

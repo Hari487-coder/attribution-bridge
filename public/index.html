@@ -373,6 +373,9 @@
         <label>Consent recency limit (days, 0 = off)</label>
         <input id="cfgMaxConsentAge" placeholder="0" style="max-width:120px">
         <div class="small" style="color:var(--dim)">Refuse a lead whose master record is older than this many days (a proxy for stale consent — keys off GHL's dateAdded, not a consent timestamp). 0 disables it.</div>
+        <label>Record national DNC status at bridge time (Jorden's 3-part policy)</label>
+        <select id="cfgNationalDncCheck"><option value="false">off</option><option value="true">on — check + record</option></select>
+        <div class="small" style="color:var(--dim)">When on, the bridge checks the national registry (FreeDNCList) for each bridged lead and records it on the consent record — so the audit trail shows you relied on the attribution opt-in for a DNC-listed number. Best-effort / fail-open; adds one lookup per bridge. Internal opt-out + suppression are absolute either way.</div>
         <label>Trusted attribution sources (comma-separated, optional)</label>
         <input id="cfgTrustedSources" placeholder="ig, facebook, my-funnel">
         <div class="small" style="color:var(--dim)">Defense-in-depth for the master as trust anchor: when set, a lead is bridged only if its attribution values contain one of these tokens, so forged/untrusted attribution is refused. Empty = accept any genuine attribution.</div>
@@ -662,6 +665,7 @@ async function loadConfig() {
   $("cfgMaxConsentAge").value = CONFIG.settings.maxConsentAgeDays || 0;
   $("cfgTrustedSources").value = (CONFIG.settings.trustedAttributionSources || []).join(", ");
   $("cfgWebhookSigningSecret").value = CONFIG.settings.webhookSigningSecret || "";
+  $("cfgNationalDncCheck").value = String(CONFIG.settings.nationalDncCheck === true);
   $("cfgSecretStatus").textContent = CONFIG.signingSecret === "(set)"
     ? "Signing secret: set ✓ (used to sign verification records)"
     : "Signing secret: will be generated on first run";
@@ -750,6 +754,7 @@ $("cfgSave").onclick = async () => {
         maxConsentAgeDays: Math.max(0, parseInt($("cfgMaxConsentAge").value, 10) || 0),
         trustedAttributionSources: $("cfgTrustedSources").value.split(",").map((s) => s.trim()).filter(Boolean),
         webhookSigningSecret: $("cfgWebhookSigningSecret").value,
+        nationalDncCheck: $("cfgNationalDncCheck").value === "true",
         distributionTag: $("cfgDistTag").value.trim(),
         alertWebhookUrl: $("cfgAlertUrl").value.trim(),
         backupWebhookUrl: $("cfgBackupUrl").value.trim(),
