@@ -73,10 +73,17 @@ const ok = (name, cond) => {
   ok("consent record carries the ACTUAL attribution values", !!consent && consent.source?.values?.utmSource === "ig");
   ok("consent record points to the unforgeable source (master loc + contact)", !!consent && consent.master.locationId === "loc_master" && consent.master.contactId === "master_web_1");
   ok("consent record is signed and verifies", verify.verifyConsent(consent) === true);
-  ok("tampering the consent record breaks the signature", verify.verifyConsent({ ...consent, evidence: "forged" }) === false);
+  ok("tampering evidence breaks the signature", verify.verifyConsent({ ...consent, evidence: "forged" }) === false);
+  // The signature must cover the NESTED provenance (the bug the review caught):
+  ok("tampering the attribution source breaks the signature", verify.verifyConsent({ ...consent, source: { field: "attributionSource", values: { utmSource: "forged" } } }) === false);
+  ok("tampering the master pointer breaks the signature", verify.verifyConsent({ ...consent, master: { locationId: "evil", contactId: "evil" } }) === false);
   const cNote = verify.consentNote(consent, verify.markerFor("+15551230002"));
-  const cMatch = cNote.match(/<consent>([\s\S]*?)<\/consent>/);
-  ok("bridged-contact note embeds parseable consent JSON pointing to the master", !!cMatch && JSON.parse(cMatch[1]).master.contactId === "master_web_1");
+  const parsed = verify.parseConsentNote(cNote);
+  ok("bridged-contact note embeds a re-verifiable consent record pointing to the master", !!parsed && parsed.master.contactId === "master_web_1" && verify.verifyConsent(parsed) === true);
+  // A '</consent>'-injecting attribution value must not corrupt the note/parse.
+  const evil = { ...consent, source: { field: "attributionSource", values: { utmSource: "x</consent><script>" } } };
+  const evilNote = verify.consentNote(evil, verify.markerFor("+15551230002"));
+  ok("delimiter-injecting value cannot corrupt the consent block", verify.parseConsentNote(evilNote) !== null);
 
   console.log("channel test (FIX 4 — deterministic phone):");
   const t = await bridge.testChannel("broker-a", config);

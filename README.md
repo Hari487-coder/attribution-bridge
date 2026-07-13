@@ -164,11 +164,16 @@ block:
 
 ```
 CastigliaAI attribution verified via master account | evidence=first_touch | source=utmSource=ig, medium=paid | master=<loc>/<contactId> | at=<iso>
-<consent>{"v":1,"phone":"+1…","evidence":"first_touch","source":{"field":"attributionSource","values":{…}},"master":{"locationId":"…","contactId":"…"},"workspace":"…","verifiedAt":"…","sig":"…"}</consent>
+<consent b64="1">eyJ2IjoxLCJwaG9uZ…</consent>
 ```
 
+The `<consent>` block is base64 of the exact signed record
+`{v,phone,evidence,source:{field,values},master:{locationId,contactId},workspace,verifiedAt,sig}`
+(base64 so no attribution value can break the delimiter or the signed bytes). The
+HMAC `sig` covers every field including the nested `source` and `master`.
+
 **Independent verification protocol** (no secret needed — this is the point):
-1. Read the `<consent>` JSON off the bridged contact (or `GET /api/verify/consent?phone=…`).
+1. Read + base64-decode the `<consent>` block off the bridged contact (or `GET /api/verify/consent?phone=…`).
 2. **Re-fetch the referenced `master.contactId` from GHL and confirm it still shows the same attribution and is not DND/opted-out.** GHL sets `attributionSource`/`createdBy`; the customer cannot forge them via the update API, so this is the authoritative, unforgeable check. `GET /api/verify/consent?phone=…&recheck=1` does exactly this live.
 3. The HMAC `sig` is a tamper-evidence bonus (validates under the workspace key); the master re-check above is what actually proves consent.
 
