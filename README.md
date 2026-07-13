@@ -31,9 +31,12 @@ tokens and compliance records on every restart). Your API tokens live only on
 your instance; nothing passes through anyone else's infrastructure.
 
 After it deploys: open the URL and **sign in as the super-admin**. Set
-`SUPERADMIN_USER` / `SUPERADMIN_PASS` as env vars before first boot to choose
-those credentials; if you don't, a random password is generated and printed to
-the logs on first boot (search the deploy log for `seeded super-admin`). From the
+`SUPERADMIN_USER` / `SUPERADMIN_PASS` as env vars to choose those credentials.
+They are **authoritative on every boot** — set (or change) them at any time and
+the super-admin login reconciles to match on the next restart, so it doesn't
+matter whether you set them before or after the first deploy. If you never set
+`SUPERADMIN_PASS`, a random password is generated and printed to the logs on first
+boot (search the deploy log for `seeded super-admin`). From the
 super-admin account picker you create one account per team / lead vendor — each
 gets its own isolated instance (its own master, brokers, opt-out registry, and
 webhook key). See **Accounts & login** below.
@@ -111,7 +114,7 @@ on Render) in `accounts.json` + `tenants/<account>/…` — keep it out of git (
 .gitignore). Access is gated by login, so set `SUPERADMIN_PASS` before exposing.
 
 **Environment variables:** `PORT`, `DATA_DIR`, `SUPERADMIN_USER` /
-`SUPERADMIN_PASS` (super-admin login, seeded on first boot), `VALOR_PASS`
+`SUPERADMIN_PASS` (super-admin login, reconciled on every boot), `VALOR_PASS`
 (optional, sets the migrated legacy account's password), `PLATFORM_DNC`
 (comma-separated numbers the dialer never calls — set it to match the platform's
 hard-DNC list so the bridge refuses to bridge them too; private, not in the repo),

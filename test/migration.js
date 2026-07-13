@@ -75,6 +75,24 @@ tenant.migrateLegacyIfNeeded();
 ok("second migrate is a no-op (still 2 accounts)", tenant.listAccounts().length === 2);
 ok("valor config still intact after re-migrate", tenant.runInTenant("valor", () => store.loadConfig()).master.token === "TOK");
 
+// Regression (Anthony's "env vars aren't taking" bug): the super-admin above was
+// seeded with a RANDOM password because SUPERADMIN_PASS was unset on first boot.
+// Setting it afterward must reconcile the login on the next boot, not be ignored.
+process.env.SUPERADMIN_USER = "chief";
+process.env.SUPERADMIN_PASS = "NewStrongPass!42";
+tenant.migrateLegacyIfNeeded();
+ok("reconcile: SUPERADMIN_PASS set post-seed now logs in", !!tenant.verifyLogin("chief", "NewStrongPass!42"));
+ok("reconcile: super username updated to SUPERADMIN_USER", tenant.listAccounts().some((a) => a.role === "super" && a.username === "chief"));
+ok("reconcile: no extra account created (still 2)", tenant.listAccounts().length === 2);
+tenant.migrateLegacyIfNeeded();
+ok("reconcile is idempotent (login still works)", !!tenant.verifyLogin("chief", "NewStrongPass!42"));
+// Username-clash guard: reconcile must not rename super onto valor's username.
+process.env.SUPERADMIN_USER = "valor";
+tenant.migrateLegacyIfNeeded();
+ok("reconcile refuses a username clash (keeps 'chief')",
+  !!tenant.verifyLogin("chief", "NewStrongPass!42") &&
+  tenant.listAccounts().filter((a) => a.username === "valor").length === 1);
+
 console.log(`\n${fail ? "✗" : "✓"} legacy migration: ${pass} passed, ${fail} failed`);
 try {
   fs.rmSync(DATA_DIR, { recursive: true, force: true });
