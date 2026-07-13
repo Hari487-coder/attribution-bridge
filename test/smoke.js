@@ -67,6 +67,17 @@ const ok = (name, cond) => {
   const intOnly = await bridge.distributeLead({ contactId: "master_intonly_1", brokerKey: "broker-a" }, config);
   ok("distribute REFUSES an INTEGRATION-only master (no real attribution)", intOnly.ok === false && intOnly.refused === true);
 
+  console.log("verifiable consent record (independently re-verifiable):");
+  const consent = verify.consentEvidenceFor("+15551230002"); // master_web_1, just bridged
+  ok("consent record exists for a bridged lead", !!consent && consent.v === 1);
+  ok("consent record carries the ACTUAL attribution values", !!consent && consent.source?.values?.utmSource === "ig");
+  ok("consent record points to the unforgeable source (master loc + contact)", !!consent && consent.master.locationId === "loc_master" && consent.master.contactId === "master_web_1");
+  ok("consent record is signed and verifies", verify.verifyConsent(consent) === true);
+  ok("tampering the consent record breaks the signature", verify.verifyConsent({ ...consent, evidence: "forged" }) === false);
+  const cNote = verify.consentNote(consent, verify.markerFor("+15551230002"));
+  const cMatch = cNote.match(/<consent>([\s\S]*?)<\/consent>/);
+  ok("bridged-contact note embeds parseable consent JSON pointing to the master", !!cMatch && JSON.parse(cMatch[1]).master.contactId === "master_web_1");
+
   console.log("channel test (FIX 4 — deterministic phone):");
   const t = await bridge.testChannel("broker-a", config);
   ok("channel test passes in mock", t.ok && t.passes);

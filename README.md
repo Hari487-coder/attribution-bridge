@@ -155,9 +155,29 @@ The dialer does not read the signature — enforcement is the refusal plus the
 - Wire GHL's STOP/opt-out workflow to `POST /webhook/optout` with `{phone}` (or
   `{contact_id}`) to feed opt-outs automatically.
 
+### Verifiable consent record (so the dialer doesn't have to trust the bridge)
+
+Every bridged contact gets a signed **consent record** written as a note, so the
+platform (or a compliance auditor) can confirm the opt-in *independently* instead
+of trusting the `INTEGRATION` stamp. The note carries a human line plus a machine
+block:
+
+```
+CastigliaAI attribution verified via master account | evidence=first_touch | source=utmSource=ig, medium=paid | master=<loc>/<contactId> | at=<iso>
+<consent>{"v":1,"phone":"+1…","evidence":"first_touch","source":{"field":"attributionSource","values":{…}},"master":{"locationId":"…","contactId":"…"},"workspace":"…","verifiedAt":"…","sig":"…"}</consent>
+```
+
+**Independent verification protocol** (no secret needed — this is the point):
+1. Read the `<consent>` JSON off the bridged contact (or `GET /api/verify/consent?phone=…`).
+2. **Re-fetch the referenced `master.contactId` from GHL and confirm it still shows the same attribution and is not DND/opted-out.** GHL sets `attributionSource`/`createdBy`; the customer cannot forge them via the update API, so this is the authoritative, unforgeable check. `GET /api/verify/consent?phone=…&recheck=1` does exactly this live.
+3. The HMAC `sig` is a tamper-evidence bonus (validates under the workspace key); the master re-check above is what actually proves consent.
+
+This is the groundwork for platform-side enforcement: when the dialer verifies
+consent server-side, the evidence is already on every contact.
+
 ## Tests
 
-- `MOCK=1 node test/smoke.js` — 140 checks: the compliance port, phone-format
+- `MOCK=1 node test/smoke.js` — 146 checks: the compliance port, phone-format
   matching, distribute+verify, recreate, channel test, concurrent-webhook
   serialization, Tier-1 ops (backup/restore/digest), the strict evidence gate
   (INTEGRATION-only + junk attribution refused), the suppression backstop (RND/

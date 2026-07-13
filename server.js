@@ -455,6 +455,33 @@ api.post("/verify/withdraw", async (req, res) => {
   res.json({ ok: true, record, suppressed });
 });
 
+// The verifiable consent record for a number. This is what Assistable's backend
+// (or a compliance auditor) reads to confirm a bridged lead's opt-in: it carries
+// the actual attribution values + a pointer to the master record. Set recheck=1
+// to ALSO re-assess the live master (the authoritative, unforgeable check).
+api.get("/verify/consent", async (req, res) => {
+  const phone = req.query.phone;
+  if (!phone || !verify.isPlausiblePhone(phone)) {
+    return res.status(400).json({ ok: false, error: "valid ?phone= required" });
+  }
+  const record = verify.consentEvidenceFor(phone);
+  if (!record) return res.status(404).json({ ok: false, error: "no active consent record for that number" });
+  const out = { ok: true, record, signatureValid: verify.verifyConsent(record) };
+  if (req.query.recheck && record.master?.contactId) {
+    // Re-verify against the live master — the check that needs no trust in the
+    // bridge. Anyone with read access to the master can reproduce this.
+    try {
+      const cfg = store.loadConfig();
+      const master = await ghl.getContact(record.master.contactId, cfg.master.token);
+      const a = verify.assessMaster(master);
+      out.liveRecheck = { verified: a.verified, evidence: a.evidence ?? null, reason: a.verified ? null : a.reason };
+    } catch (e) {
+      out.liveRecheck = { error: e.message };
+    }
+  }
+  res.json(out);
+});
+
 api.post("/test-channel", async (req, res) => {
   try {
     const result = await bridge.testChannel(req.body?.brokerKey, store.loadConfig());
