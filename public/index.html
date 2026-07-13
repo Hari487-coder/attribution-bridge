@@ -29,6 +29,8 @@
   section { display: none; }
   section.active { display: block; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+  .boundary { background: rgba(79,140,255,.08); border: 1px solid #2c3d6b; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 12.5px; color: var(--dim); line-height: 1.55; }
+  .boundary b { color: var(--text); font-weight: 600; }
   .card h2 { font-size: 14px; margin: 0 0 4px; }
   .card p.hint { color: var(--dim); font-size: 12.5px; margin: 0 0 12px; }
   label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 3px; }
@@ -95,6 +97,13 @@
   <button data-tab="playbook">Playbook</button>
 </nav>
 <main>
+
+<div class="boundary">
+  <b>Purpose of the bridge.</b> This tool preserves and verifies consent evidence when
+  contacts are recreated across GHL subaccounts, and produces an audit trail. It does
+  <b>not</b> replace CastigliaAI's compliance engine or decide whether a call is legally
+  permitted — final DNC and calling-compliance decisions remain with the platform.
+</div>
 
 <!-- ── Pre-check ── -->
 <section id="tab-precheck" class="active">

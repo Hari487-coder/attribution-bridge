@@ -4,6 +4,15 @@ Self-hosted web app that lets GHL leads copied from a master sub-account into
 broker sub-accounts **pass CastigliaAI's DNC attribution check** — no CastigliaAI
 backend changes required.
 
+> **Purpose & scope.** This bridge is a **consent-preservation and verification
+> layer** between GHL and CastigliaAI. It preserves and verifies consent evidence
+> when contacts are recreated across GHL subaccounts, and produces an audit trail.
+> It does **not** replace CastigliaAI's compliance engine or decide whether a call
+> is legally permitted — final DNC and calling-compliance decisions remain with the
+> platform. Bridge owns: attribution verification, evidence preservation, broker
+> creation, audit. Platform owns: internal/national DNC, telephony compliance, the
+> call decision.
+
 ## One-click deploy (recommended)
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Hari487-coder/attribution-bridge)
