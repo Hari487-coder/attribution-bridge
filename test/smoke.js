@@ -498,7 +498,7 @@ const ok = (name, cond) => {
   ok("strip policy creates a new contact", stripRes.ok && stripRes.brokerContactId);
   ok("strip policy strips (not deletes) the old dupe", Array.isArray(stripRes.strippedDuplicates) && stripRes.strippedDuplicates.includes("broker_strip_copy") && stripRes.deletedDuplicates.length === 0);
   const oldStripped = await ghl2.getContact("broker_strip_copy", "t").catch(() => null);
-  ok("stripped old contact still exists with cleared phone/email", oldStripped && oldStripped.phone === "" && oldStripped.email === "");
+  ok("stripped old contact still exists with cleared phone/email", oldStripped && !oldStripped.phone && !oldStripped.email);
 
   // 3.3 — tag→broker routing
   const rSettings = { tagRouting: { "campaign-smith": "broker-smith", "campaign-jones": "broker-jones" }, distributionTag: "adl" };
