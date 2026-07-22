@@ -365,6 +365,14 @@
         </select>
         <input id="cfgTagCopyList" placeholder="Veterans, Valor Assurance" style="margin-top:6px">
         <div class="small" id="cfgTagCopyHint" style="color:var(--dim)">Comma-separated. Used only when "only these tags" is selected. Case-insensitive; the bridge never adds a tag the master contact doesn't already have.</div>
+        <label>Backlog migration — keep the old broker contact's own tags?</label>
+        <select id="cfgMigrateTagMode">
+          <option value="all">all — keep every tag it already had (default)</option>
+          <option value="list">only these tags — keep just the ones you list</option>
+          <option value="none">none — drop the broker contact's own tags</option>
+        </select>
+        <input id="cfgMigrateTagList" placeholder="Veterans, Valor Assurance" style="margin-top:6px">
+        <div class="small" id="cfgMigrateTagHint" style="color:var(--dim)">Applies only to <b>Backlog migration</b> (re-creating an existing broker contact) — separate from master-tag copy above. Use "none"/"only these" to avoid re-firing the broker's tag-triggered workflows when you migrate. The bridge/verified tags and "always add" tags still apply; the per-run override field on the Migration tab still wins. Trimming tags does not affect opt-out, DND, or Assistable's DNC gate.</div>
         <label>Always add these tags to every bridged contact (comma-separated)</label>
         <input id="cfgAlwaysAddTags" placeholder="Veterans, Valor Assurance">
         <div class="small" style="color:var(--dim)">Force-added to every bridged contact regardless of the master — use for campaign/product tags the master doesn't carry.</div>
@@ -705,6 +713,8 @@ async function loadConfig() {
   $("cfgCopyCf").value = String(CONFIG.settings.copyCustomFields);
   $("cfgTagCopyMode").value = CONFIG.settings.tagCopyMode || "all";
   $("cfgTagCopyList").value = (CONFIG.settings.tagCopyList || []).join(", ");
+  $("cfgMigrateTagMode").value = CONFIG.settings.migrateTagMode || "all";
+  $("cfgMigrateTagList").value = (CONFIG.settings.migrateTagList || []).join(", ");
   $("cfgAlwaysAddTags").value = (CONFIG.settings.alwaysAddTags || []).join(", ");
   $("cfgTagApplyMode").value = CONFIG.settings.tagApplyMode === "after" ? "after" : "create";
   syncTagCopyUi();
@@ -761,13 +771,16 @@ function renderSnippet() {
 }
 $("snipBroker").onchange = renderSnippet;
 
-// Show the tag list input only in "only these tags" mode.
+// Show each tag-list input only in its "only these tags" mode.
 function syncTagCopyUi() {
   const show = $("cfgTagCopyMode").value === "list";
   $("cfgTagCopyList").style.display = show ? "" : "none";
   $("cfgTagCopyHint").style.display = show ? "" : "none";
+  const showMig = $("cfgMigrateTagMode").value === "list";
+  $("cfgMigrateTagList").style.display = showMig ? "" : "none";
 }
 $("cfgTagCopyMode").onchange = syncTagCopyUi;
+$("cfgMigrateTagMode").onchange = syncTagCopyUi;
 
 $("cfgAddBroker").onclick = () => addBrokerRow();
 $("cfgWebhookKey").oninput = refreshAllBrokerSnippets;
@@ -794,6 +807,8 @@ $("cfgSave").onclick = async () => {
         copyCustomFields: $("cfgCopyCf").value === "true",
         tagCopyMode: $("cfgTagCopyMode").value,
         tagCopyList: $("cfgTagCopyList").value.split(",").map((t) => t.trim()).filter(Boolean),
+        migrateTagMode: $("cfgMigrateTagMode").value,
+        migrateTagList: $("cfgMigrateTagList").value.split(",").map((t) => t.trim()).filter(Boolean),
         alwaysAddTags: $("cfgAlwaysAddTags").value.split(",").map((t) => t.trim()).filter(Boolean),
         tagApplyMode: $("cfgTagApplyMode").value === "after" ? "after" : "create",
         bridgeTag: $("cfgBridgeTag").value.trim(),

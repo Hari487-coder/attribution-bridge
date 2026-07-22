@@ -303,6 +303,26 @@ const ok = (name, cond) => {
   ok("overrideTags: contact gets EXACTLY the override tags (no old/app tags)",
     JSON.stringify((ovContact.tags || []).slice().sort()) === JSON.stringify(["manual-migrated"]));
 
+  // migrateTagMode (Anthony): control how many of the OLD BROKER contact's OWN tags
+  // survive a migration, so a recreate doesn't re-fire the broker's tag-triggered
+  // workflows. Independent from tagCopyMode (which governs the live bridge). The
+  // app bridge/verified tags always apply; opt-out/DND are fields, untouched here.
+  const migTagCfg = (mode, list) => ({ brokers: { "broker-a": { label: "broker-a", locationId: "loc_broker_a", token: "t" } }, master: { locationId: "loc_master", token: "t" }, settings: { duplicatePolicy: "recreate", bridgeTag: "attribution-bridge", verifiedTag: "castigliaai-verified", tagApplyMode: "create", migrateTagMode: mode, migrateTagList: list || [] } });
+  // "none" → the broker contact's own tags (fb lead, vip) are dropped; app tags stay.
+  const rMigNone = await bridge.migrateRun("broker-a", ["broker_migtag_none"], migTagCfg("none"), { dryRun: false });
+  ok("migrateTagMode none: migrate succeeds", rMigNone.results[0].action === "recreated" && !!rMigNone.results[0].newId);
+  const migNoneC = await ghl.getContact(rMigNone.results[0].newId, "t");
+  ok("migrateTagMode none: drops the broker contact's own tags", !(migNoneC.tags || []).some((t) => /^(fb lead|vip)$/i.test(t)));
+  ok("migrateTagMode none: still applies the app bridge/verified tags", (migNoneC.tags || []).some((t) => t.toLowerCase() === "attribution-bridge"));
+  // "list" → keep only the named broker tag (vip), drop the rest (fb lead).
+  const rMigList = await bridge.migrateRun("broker-a", ["broker_migtag_list"], migTagCfg("list", ["vip"]), { dryRun: false });
+  const migListC = await ghl.getContact(rMigList.results[0].newId, "t");
+  ok("migrateTagMode list: keeps a listed broker tag", (migListC.tags || []).some((t) => t.toLowerCase() === "vip"));
+  ok("migrateTagMode list: drops an unlisted broker tag", !(migListC.tags || []).some((t) => t.toLowerCase() === "fb lead"));
+  // Default (unset) must remain "keep all" so existing deployments don't change.
+  const rMigDefault = bridge.selectCarryTags(["fb lead", "vip"], { tagCopyMode: (migTagCfg("all").settings.migrateTagMode) || "all", bridgeTag: "attribution-bridge" }, false);
+  ok("migrateTagMode default 'all': keeps every broker tag", rMigDefault.includes("fb lead") && rMigDefault.includes("vip"));
+
   console.log("registry-poisoning bypass (must stay closed):");
   // Regression for the confirmed restore->migrate laundering bypass: an
   // authenticated user restores a crafted bundle that marks a COLD number
